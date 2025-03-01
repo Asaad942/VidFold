@@ -10,7 +10,7 @@ services:
     startCommand: |
       cd backend
       export PYTHONPATH=$PWD
-      python -m uvicorn asgi:app --host 0.0.0.0 --port $PORT
+      python -m uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
