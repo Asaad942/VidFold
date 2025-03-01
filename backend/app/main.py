@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import logging
-from .core.config import settings
-from .api import auth, videos, search
-from .services.vector_store import vector_store
+from app.core.config import settings
+from app.api import auth, videos, search
+from app.services.vector_store import vector_store
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -3,14 +3,16 @@ services:
   - type: web
     name: vidfold-backend
     env: python3
-    rootDirectory: backend
-    buildCommand: pip3 install -r requirements.txt
-    startCommand: python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: |
+      cd backend
+      pip install -r requirements.txt
+      apt-get update && apt-get install -y ffmpeg
+    startCommand: cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PYTHONPATH
-        value: .
+        value: backend
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
