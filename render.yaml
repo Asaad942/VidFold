@@ -7,14 +7,7 @@ services:
       cd backend
       pip install -r requirements.txt
       apt-get update && apt-get install -y ffmpeg
-    startCommand: |
-      cd backend
-      pwd
-      ls -la
-      echo "PYTHONPATH=$PYTHONPATH"
-      export PYTHONPATH=$PWD
-      echo "Updated PYTHONPATH=$PYTHONPATH"
-      python -m uvicorn server:app --host 0.0.0.0 --port $PORT --log-level debug
+    startCommand: cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT --log-level debug
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
