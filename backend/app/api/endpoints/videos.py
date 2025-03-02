@@ -155,6 +155,9 @@ async def process_video_background(video_id: str, url: str):
         # Update the video analysis in Supabase
         supabase.table("video_analysis").insert(analysis_data).execute()
         
+        # Update video status to completed
+        supabase.table("videos").update({"status": "completed"}).eq("id", video_id).execute()
+        
     except Exception as e:
         print(f"Background processing error: {str(e)}")
         # Update video status to indicate error

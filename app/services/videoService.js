@@ -79,7 +79,7 @@ export const videoService = {
             url: videoUrl,
             platform,
             title,
-            status: 'pending',
+            status: 'pending',  // Initial status when video is first added
             created_at: new Date().toISOString(),
           },
         ])
