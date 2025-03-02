@@ -2,10 +2,9 @@
 services:
   - type: web
     name: vidfold-backend
-    env: python3
-    rootDir: backend  # Explicitly set the root directory
-    buildCommand: pip install -r requirements.txt
-    startCommand: python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level debug
+    env: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
