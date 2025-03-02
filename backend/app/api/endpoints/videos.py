@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, Body, BackgroundTasks
 from typing import Dict, Any, Optional, List
 from ...schemas.video import VideoLinkCreate, VideoLinkResponse, Platform, VideoProcessRequest, VideoURL, VideoUpdate
 from ...core.database import supabase
@@ -131,62 +131,81 @@ async def delete_video(
     else:
         raise HTTPException(status_code=400, detail="Failed to delete video")
 
+async def process_video_background(video_id: str, url: str):
+    """
+    Background task to handle heavy video processing
+    """
+    try:
+        # Run visual analysis and transcription
+        visual_analysis = await visual_analysis_service.analyze_video(url)
+        transcription = await audio_transcription_service.transcribe_video(url)
+        
+        # Save analysis results
+        analysis_data = {
+            "video_id": video_id,
+            "visual_summary": str(visual_analysis.get("detected_objects", [])),
+            "audio_transcription": transcription.get("text", ""),
+            "keywords": visual_analysis.get("detected_objects", []) + transcription.get("keywords", []),
+            "metadata": {
+                "visual_analysis": visual_analysis,
+                "transcription": transcription
+            }
+        }
+        
+        # Update the video analysis in Supabase
+        supabase.table("video_analysis").insert(analysis_data).execute()
+        
+    except Exception as e:
+        print(f"Background processing error: {str(e)}")
+        # Update video status to indicate error
+        supabase.table("videos").update({"status": "error"}).eq("id", video_id).execute()
+
 @router.post("/process")
 async def process_video(
     video: VideoProcessRequest,
+    background_tasks: BackgroundTasks,
     token: str = Depends(auth_service.get_user)
 ):
     """
-    Process a video by extracting metadata, analyzing content, and transcribing audio.
+    Process a video in two steps:
+    1. Extract basic metadata (fast)
+    2. Run heavy processing in background (slow)
     """
     try:
         # Verify user is authenticated
         if not token:
             raise HTTPException(status_code=401, detail="Not authenticated")
             
-        # Extract metadata using yt-dlp
+        # Step 1: Extract metadata using yt-dlp (fast)
         with yt_dlp.YoutubeDL() as ydl:
             info = ydl.extract_info(video.url, download=False)
             
-            # Update video with metadata
+            # Update video with metadata immediately
             metadata = {
                 "title": info.get("title"),
                 "thumbnail_url": info.get("thumbnail"),
-                "duration": info.get("duration")
+                "duration": info.get("duration"),
+                "status": "processing",  # Indicate background processing is ongoing
+                "description": info.get("description", "")
             }
             
             result = supabase.table("videos").update(metadata).eq("id", video.video_id).execute()
             
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to update video metadata")
+        
+        # Step 2: Schedule heavy processing for background
+        background_tasks.add_task(process_video_background, video.video_id, video.url)
             
-            # Start visual analysis and transcription in background tasks
-            # Note: This should ideally be handled by a proper task queue like Celery
-            # For now, we'll do it synchronously
-            visual_analysis = await visual_analysis_service.analyze_video(video.url)
-            transcription = await audio_transcription_service.transcribe_video(video.url)
-            
-            # Save analysis results
-            analysis_data = {
-                "video_id": video.video_id,
-                "search_summary": f"{info.get('title')} - {info.get('description')}",
-                "visual_summary": str(visual_analysis.get("detected_objects", [])),
-                "audio_transcription": transcription.get("text", ""),
-                "keywords": visual_analysis.get("detected_objects", []) + transcription.get("keywords", []),
-                "metadata": {
-                    "visual_analysis": visual_analysis,
-                    "transcription": transcription
-                }
-            }
-            
-            result = supabase.table("video_analysis").insert(analysis_data).execute()
-            
-            if not result.data:
-                raise HTTPException(status_code=500, detail="Failed to save video analysis")
-                
-            return {"status": "success", "message": "Video processed successfully"}
+        return {
+            "status": "processing",
+            "message": "Video metadata updated, analysis started in background",
+            "metadata": metadata
+        }
             
     except Exception as e:
+        # Update video status to indicate error
+        supabase.table("videos").update({"status": "error"}).eq("id", video.video_id).execute()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/transcribe")

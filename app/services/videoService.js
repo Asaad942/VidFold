@@ -70,7 +70,7 @@ export const videoService = {
 
       console.log('Attempting to add video with user_id:', user.id);
 
-      // Insert the video into Supabase
+      // Insert the video into Supabase with initial status
       const { data, error: insertError } = await supabase
         .from('videos')
         .insert([
@@ -79,6 +79,7 @@ export const videoService = {
             url: videoUrl,
             platform,
             title,
+            status: 'pending',
             created_at: new Date().toISOString(),
           },
         ])
@@ -110,13 +111,16 @@ export const videoService = {
 
         if (!response.ok) {
           console.warn('Video processing request failed:', await response.text());
+          return { ...data[0], status: 'error' };
         }
+
+        // Get the metadata from the response
+        const processingData = await response.json();
+        return { ...data[0], ...processingData.metadata };
       } catch (processingError) {
         console.warn('Error triggering video processing:', processingError);
-        // Don't throw here - we still want to return the video data even if processing fails
+        return { ...data[0], status: 'error' };
       }
-
-      return data[0];
     } catch (error) {
       console.error('Error in addVideo:', error);
       throw new Error(`Failed to add video: ${error.message}`);
@@ -193,6 +197,30 @@ export const videoService = {
       return true;
     } catch (error) {
       console.error('Error adding video to category:', error.message);
+      throw error;
+    }
+  },
+
+  // Check video processing status
+  checkProcessingStatus: async (videoId) => {
+    try {
+      const { data, error } = await supabase
+        .from('videos')
+        .select(`
+          *,
+          video_analysis (
+            visual_summary,
+            audio_transcription,
+            keywords
+          )
+        `)
+        .eq('id', videoId)
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error checking video status:', error);
       throw error;
     }
   },
