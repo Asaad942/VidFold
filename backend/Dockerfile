@@ -1,15 +1,9 @@
-FROM python:3.11-slim
+FROM jrottenberg/ffmpeg:4.4-ubuntu
 
-# Create required directories and set permissions
-RUN mkdir -p /var/lib/apt/lists/partial && \
-    chmod -R 777 /var/lib/apt/lists/partial
-
-# Install system dependencies
-RUN apt-get clean && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python
+RUN apt-get update && \
+    apt-get install -y python3-pip python3.11 && \
+    ln -s /usr/bin/python3 /usr/bin/python
 
 # Set working directory
 WORKDIR /app
@@ -18,7 +12,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
@@ -31,4 +25,4 @@ ENV PORT=10000
 EXPOSE ${PORT}
 
 # Command to run the application
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}", "--log-level", "debug"] 
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "${PORT}", "--log-level", "debug"] 
