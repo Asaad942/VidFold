@@ -4,7 +4,7 @@ services:
     name: vidfold-backend
     env: python
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: python start.py
+    startCommand: python run.py
     rootDir: backend
     envVars:
       - key: PYTHON_VERSION
