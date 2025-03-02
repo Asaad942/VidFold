@@ -27,6 +27,7 @@ const AddVideoScreen = () => {
   const [videoUrl, setVideoUrl] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const navigation = useNavigation();
 
   const detectPlatform = (url) => {
@@ -66,21 +67,33 @@ const AddVideoScreen = () => {
     }
 
     setLoading(true);
+    setProcessingStatus('Adding video...');
     try {
-      await videoService.addVideo(videoUrl, platform);
+      const result = await videoService.addVideo(videoUrl, platform);
+      
+      // Show success message but don't block navigation
       Alert.alert(
         'Success',
-        'Video added successfully!',
+        'Video added successfully! Processing will continue in the background.',
         [
           {
-            text: 'OK',
+            text: 'View Videos',
             onPress: () => {
               setVideoUrl('');
               setSelectedCategory(null);
               navigation.navigate('HomeTab');
             },
           },
-        ]
+          {
+            text: 'Add Another',
+            onPress: () => {
+              setVideoUrl('');
+              setSelectedCategory(null);
+              setProcessingStatus('');
+            },
+          }
+        ],
+        { cancelable: false }
       );
     } catch (error) {
       Alert.alert('Error', error.message);
@@ -131,6 +144,13 @@ const AddVideoScreen = () => {
               )}
             </TouchableOpacity>
           </View>
+
+          {processingStatus ? (
+            <View style={styles.processingContainer}>
+              <ActivityIndicator color="#FFFFFF" />
+              <Text style={styles.processingText}>{processingStatus}</Text>
+            </View>
+          ) : null}
 
           <Text style={styles.categoryTitle}>Select Platform</Text>
           
@@ -212,6 +232,20 @@ const styles = StyleSheet.create({
   },
   addButtonDisabled: {
     opacity: 0.7,
+  },
+  processingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    padding: 10,
+    borderRadius: 10,
+  },
+  processingText: {
+    color: '#FFFFFF',
+    marginLeft: 10,
+    fontSize: 14,
   },
   categoryTitle: {
     fontSize: 16,
