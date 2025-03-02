@@ -4,9 +4,11 @@ services:
     name: vidfold-backend
     env: python
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level debug
+    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level debug
     rootDir: backend
     envVars:
+      - key: PORT
+        value: "8000"
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PYTHONPATH
