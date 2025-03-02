@@ -1,6 +1,6 @@
 import { supabase } from '../config/supabase';
 
-const API_URL = 'http://localhost:8000/api/v1'; // Update this with your actual backend URL
+const API_URL = 'https://vidfold-backend.onrender.com/api/v1'; // Render deployment URL
 
 export const videoService = {
   // Get all videos for the current user

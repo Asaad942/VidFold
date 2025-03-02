@@ -19,6 +19,12 @@ class VideoLinkResponse(BaseModel):
     platform: Platform
     status: str = "processing"
 
+class VideoProcessRequest(BaseModel):
+    """Schema for video processing request"""
+    video_id: str
+    url: str
+    platform: Platform
+
 class VideoURL(BaseModel):
     """Schema for video URL input"""
     url: HttpUrl

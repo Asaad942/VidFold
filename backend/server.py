@@ -42,7 +42,8 @@ try:
     logger.debug("Attempting to import app components...")
     from app.core.config import settings
     logger.debug("settings imported")
-    from app.api import auth, videos, search
+    from app.api import auth, search
+    from app.api.endpoints import videos  # Updated import path
     logger.debug("api modules imported")
     from app.services.vector_store import vector_store
     logger.debug("vector_store imported")
@@ -60,10 +61,11 @@ try:
     # Configure CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["*"],  # In production, replace with your frontend URL
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"]
     )
     logger.debug("CORS middleware configured")
 
@@ -75,7 +77,7 @@ try:
     )
 
     app.include_router(
-        videos.router,
+        videos.router,  # Using the correct videos router
         prefix=f"{settings.API_V1_STR}/videos",
         tags=["videos"]
     )
