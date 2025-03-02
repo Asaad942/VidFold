@@ -26,5 +26,9 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-    packages:
-      - ffmpeg 
+    plan: free
+    runtime: python3
+    preInstallCommand: |
+      # Install system dependencies
+      apt-get update
+      apt-get install -y ffmpeg 
