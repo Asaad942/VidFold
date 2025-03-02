@@ -10,11 +10,20 @@ class OAuth2PasswordBearerWithQuery(OAuth2PasswordBearer):
         # First try to get the token from query parameters
         token = request.query_params.get("access_token")
         if token:
-            return token
-        # If not in query params, try the normal authorization header
+            # Verify the token is valid
+            user = await auth_service.get_user(token)
+            if user:
+                return token
+        # If not in query params or invalid, try the normal authorization header
         return await super().__call__(request)
 
 oauth2_scheme = OAuth2PasswordBearerWithQuery(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    user = await auth_service.get_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return user
 
 @router.post("/signup")
 async def signup(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, Any]:
@@ -40,24 +49,21 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, A
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
 @router.post("/logout")
-async def logout(token: str = Depends(oauth2_scheme)) -> Dict[str, str]:
+async def logout(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
     try:
-        await auth_service.sign_out(token)
+        await auth_service.sign_out(user["access_token"])
         return {"message": "Successfully logged out"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/me")
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
-    user = await auth_service.get_user(token)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
+async def get_me(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     return user
 
 @router.post("/refresh")
-async def refresh_token(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+async def refresh_token(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     try:
-        response = await auth_service.refresh_token(token)
+        response = await auth_service.refresh_token(user["refresh_token"])
         return {
             "access_token": response["session"]["access_token"],
             "token_type": "bearer"

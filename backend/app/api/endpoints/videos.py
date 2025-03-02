@@ -7,13 +7,17 @@ from ...services.visual_analysis import visual_analysis_service
 from ...services.audio_transcription import audio_transcription_service
 from ...services.auth import auth_service
 from ...services.video_management import video_management_service
+from ..auth import get_current_user
 import uuid
 import yt_dlp
 
 router = APIRouter()
 
 @router.post("/", response_model=VideoLinkResponse)
-async def add_video(video: VideoLinkCreate):
+async def add_video(
+    video: VideoLinkCreate,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     Add a new video link to process.
     This endpoint accepts video links from both manual input and app sharing.
@@ -51,9 +55,11 @@ async def add_video(video: VideoLinkCreate):
             "id": str(uuid.uuid4()),
             "url": url,
             "platform": video.platform,
+            "user_id": user["id"],
             "title": None,  # Will be updated after processing
             "thumbnail_url": None,  # Will be updated after processing
-            "duration": None  # Will be updated after processing
+            "duration": None,  # Will be updated after processing
+            "status": "pending"  # Initial status
         }
         
         result = supabase.table("videos").insert(data).execute()
@@ -65,7 +71,7 @@ async def add_video(video: VideoLinkCreate):
             id=data["id"],
             url=url,
             platform=video.platform,
-            status="processing"
+            status="pending"
         )
     except HTTPException as e:
         raise e
@@ -173,7 +179,7 @@ async def process_video_background(video_id: str, url: str, user_id: str):
 async def process_video(
     video: VideoProcessRequest,
     background_tasks: BackgroundTasks,
-    token: str = Depends(auth_service.get_user)
+    user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     Process a video in two steps:
@@ -181,10 +187,6 @@ async def process_video(
     2. Run heavy processing in background (slow)
     """
     try:
-        # Verify user is authenticated
-        if not token:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-            
         # Step 1: Extract metadata using yt-dlp (fast)
         with yt_dlp.YoutubeDL() as ydl:
             info = ydl.extract_info(video.url, download=False)
@@ -199,7 +201,7 @@ async def process_video(
             }
             
             # Verify the video belongs to the user before updating
-            result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", token["user_id"]).execute()
+            result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", user["id"]).execute()
             if not result.data:
                 raise HTTPException(status_code=404, detail="Video not found or access denied")
             
@@ -209,7 +211,7 @@ async def process_video(
                 raise HTTPException(status_code=500, detail="Failed to update video metadata")
         
         # Step 2: Schedule heavy processing for background
-        background_tasks.add_task(process_video_background, video.video_id, video.url, token["user_id"])
+        background_tasks.add_task(process_video_background, video.video_id, video.url, user["id"])
             
         return {
             "status": "processing",
