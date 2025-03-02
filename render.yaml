@@ -5,11 +5,12 @@ services:
     env: docker
     rootDir: backend
     dockerfilePath: Dockerfile
+    dockerCommand: bash -c "mkdir -p /var/lib/apt/lists/partial && chmod -R 777 /var/lib/apt/lists/partial && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level debug"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PYTHONPATH
-        value: /opt/render/project/src/backend
+        value: /app
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
