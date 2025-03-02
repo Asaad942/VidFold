@@ -1,41 +1,7 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# Dependencies
 node_modules/
-
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-app-example
 
 # Environment variables
 .env
@@ -63,21 +29,70 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Virtual Environments
 venv/
 venv310/
 **/venv/
 **/venv310/
+.Python
+env/
+ENV/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.settings/
+*.tmproj
+*.esproj
+nbproject/
+*.tsbuildinfo
 
 # OS
 .DS_Store
 Thumbs.db
+*.tmp
+*.bak
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
 
 # Large files
 backend/ffmpeg.exe
 *.exe
+*.log
+*.sql
+*.sqlite
+
+# Custom
+app-example
