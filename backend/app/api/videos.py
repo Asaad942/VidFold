@@ -5,14 +5,9 @@ from ..services.visual_analysis import visual_analysis_service
 from ..services.audio_transcription import audio_transcription_service
 from ..services.auth import auth_service
 from ..services.video_management import video_management_service
-from pydantic import BaseModel, HttpUrl
+from ..schemas.video import VideoURL, VideoUpdate, VideoResponse
 
 router = APIRouter()
-
-class VideoUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    keywords: Optional[list[str]] = None
 
 @router.post("/transcribe")
 async def transcribe_video_audio(
