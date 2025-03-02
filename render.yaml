@@ -11,6 +11,11 @@ services:
         value: 3.11.0
       - key: PYTHONPATH
         value: /opt/render/project/src/backend
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
+      - key: REFRESH_TOKEN_EXPIRE_MINUTES
+        value: "43200"
+      # These sensitive values should be set in Render dashboard
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -21,9 +26,5 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-      - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "1440"
-      - key: REFRESH_TOKEN_EXPIRE_MINUTES
-        value: "43200"
     packages:
       - ffmpeg 
