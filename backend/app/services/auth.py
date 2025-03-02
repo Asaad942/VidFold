@@ -80,8 +80,14 @@ class AuthService:
     async def get_user(self, access_token: str) -> Optional[Dict[str, Any]]:
         try:
             response = await self.supabase.auth.get_user(access_token)
-            return response.dict() if response else None
-        except Exception:
+            if not response:
+                return None
+            return {
+                "user": response.user,
+                "access_token": access_token
+            }
+        except Exception as e:
+            logger.error(f"Error getting user: {str(e)}")
             return None
     
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:

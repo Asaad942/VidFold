@@ -20,10 +20,13 @@ class OAuth2PasswordBearerWithQuery(OAuth2PasswordBearer):
 oauth2_scheme = OAuth2PasswordBearerWithQuery(tokenUrl="token")
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
-    user = await auth_service.get_user(token)
-    if not user:
+    try:
+        user_data = await auth_service.get_user(token)
+        if not user_data or not user_data.get("user"):
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_data
+    except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token")
-    return user
 
 @router.post("/signup")
 async def signup(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, Any]:

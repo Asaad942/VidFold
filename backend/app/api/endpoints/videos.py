@@ -55,7 +55,7 @@ async def add_video(
             "id": str(uuid.uuid4()),
             "url": url,
             "platform": video.platform,
-            "user_id": user["id"],
+            "user_id": user.get("user", {}).get("id"),
             "title": None,  # Will be updated after processing
             "thumbnail_url": None,  # Will be updated after processing
             "duration": None,  # Will be updated after processing
@@ -201,7 +201,7 @@ async def process_video(
             }
             
             # Verify the video belongs to the user before updating
-            result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", user["id"]).execute()
+            result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", user.get("user", {}).get("id")).execute()
             if not result.data:
                 raise HTTPException(status_code=404, detail="Video not found or access denied")
             
@@ -211,7 +211,7 @@ async def process_video(
                 raise HTTPException(status_code=500, detail="Failed to update video metadata")
         
         # Step 2: Schedule heavy processing for background
-        background_tasks.add_task(process_video_background, video.video_id, video.url, user["id"])
+        background_tasks.add_task(process_video_background, video.video_id, video.url, user.get("user", {}).get("id"))
             
         return {
             "status": "processing",
