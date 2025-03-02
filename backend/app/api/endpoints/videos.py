@@ -131,11 +131,17 @@ async def delete_video(
     else:
         raise HTTPException(status_code=400, detail="Failed to delete video")
 
-async def process_video_background(video_id: str, url: str):
+async def process_video_background(video_id: str, url: str, user_id: str):
     """
     Background task to handle heavy video processing
     """
     try:
+        # First verify the video belongs to the user
+        result = supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
+        if not result.data:
+            print(f"Video {video_id} not found or does not belong to user {user_id}")
+            return
+
         # Run visual analysis and transcription
         visual_analysis = await visual_analysis_service.analyze_video(url)
         transcription = await audio_transcription_service.transcribe_video(url)
@@ -192,13 +198,18 @@ async def process_video(
                 "description": info.get("description", "")
             }
             
+            # Verify the video belongs to the user before updating
+            result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", token["user_id"]).execute()
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Video not found or access denied")
+            
             result = supabase.table("videos").update(metadata).eq("id", video.video_id).execute()
             
             if not result.data:
                 raise HTTPException(status_code=500, detail="Failed to update video metadata")
         
         # Step 2: Schedule heavy processing for background
-        background_tasks.add_task(process_video_background, video.video_id, video.url)
+        background_tasks.add_task(process_video_background, video.video_id, video.url, token["user_id"])
             
         return {
             "status": "processing",
