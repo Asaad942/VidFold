@@ -12,14 +12,10 @@ class AuthService:
             raise ValueError("Supabase URL and key must be provided")
             
         try:
-            # Initialize Supabase client with only required parameters
+            # Initialize Supabase client with minimal configuration
             self.supabase: Client = create_client(
-                supabase_url=supabase_url,
-                supabase_key=supabase_key,
-                options={
-                    "auto_refresh_token": True,
-                    "persist_session": True
-                }
+                supabase_url,
+                supabase_key
             )
         except Exception as e:
             raise Exception(f"Failed to initialize Supabase client: {str(e)}")
