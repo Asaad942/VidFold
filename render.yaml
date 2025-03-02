@@ -24,6 +24,4 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "1440"
       - key: REFRESH_TOKEN_EXPIRE_MINUTES
-        value: "43200"
-    packages:
-      - ffmpeg  # Use Render's package system instead of apt-get 
+        value: "43200" 
