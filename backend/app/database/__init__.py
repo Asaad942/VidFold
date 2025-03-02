@@ -16,4 +16,12 @@ try:
 except Exception as e:
     raise Exception(f"Failed to initialize Supabase client: {str(e)}")
 
-__all__ = ['supabase'] 
+def get_db() -> Client:
+    """
+    Get a database client instance.
+    Returns:
+        Client: A Supabase client instance
+    """
+    return supabase
+
+__all__ = ['supabase', 'get_db'] 
