@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 import numpy as np
-from ..database.base import get_db
+from ..database.sql import get_db
 from ..utils.embeddings import get_embedding
 from .vector_store import vector_store
 

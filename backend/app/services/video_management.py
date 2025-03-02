@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from ..database.base import get_db
+from ..database.sql import get_db
 from fastapi import HTTPException
 from .vector_store import vector_store
 

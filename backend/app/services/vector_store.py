@@ -1,7 +1,7 @@
 import faiss
 import numpy as np
 from typing import List, Tuple, Dict, Any
-from ..database.base import get_db
+from ..database.sql import get_db
 
 class VectorStore:
     def __init__(self):

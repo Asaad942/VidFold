@@ -1,7 +1,7 @@
 from typing import Dict, List
 import json
 from .summary_generator import SearchableSummary
-from ..database.base import get_db
+from ..database.sql import get_db
 from sqlalchemy.orm import Session
 
 async def store_video_analysis(
