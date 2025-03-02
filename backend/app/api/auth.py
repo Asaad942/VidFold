@@ -1,10 +1,20 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from ..services.auth import auth_service
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+class OAuth2PasswordBearerWithQuery(OAuth2PasswordBearer):
+    async def __call__(self, request: Request) -> Optional[str]:
+        # First try to get the token from query parameters
+        token = request.query_params.get("access_token")
+        if token:
+            return token
+        # If not in query params, try the normal authorization header
+        return await super().__call__(request)
+
+oauth2_scheme = OAuth2PasswordBearerWithQuery(tokenUrl="token")
 
 @router.post("/signup")
 async def signup(form_data: OAuth2PasswordRequestForm = Depends()) -> Dict[str, Any]:
