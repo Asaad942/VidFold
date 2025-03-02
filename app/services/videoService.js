@@ -96,16 +96,15 @@ export const videoService = {
       // Trigger video processing in the backend
       try {
         const { session } = await supabase.auth.getSession();
-        const response = await fetch(`${API_URL}/videos/process`, {
+        const response = await fetch(`${API_URL}/videos/process?access_token=${session?.access_token}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
           },
           body: JSON.stringify({
             video_id: data[0].id,
             url: videoUrl,
-            platform,
+            platform: platform.toLowerCase(),
           }),
         });
 
