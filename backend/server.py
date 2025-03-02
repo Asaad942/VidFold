@@ -1,9 +1,11 @@
 import os
 import sys
 import logging
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 
 # Configure logging first
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)  # Change to INFO level
 logger = logging.getLogger(__name__)
 
 # Print current directory and Python path for debugging
@@ -86,27 +88,30 @@ try:
             subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
             logger.info("✅ ffmpeg is available and working")
             return True
-        except subprocess.CalledProcessError as e:
-            logger.error(f"❌ Error running ffmpeg: {e}")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.error(f"❌ ffmpeg error: {e}")
             return False
-        except FileNotFoundError:
-            logger.error("❌ ffmpeg is not installed or not in PATH")
-            return False
+
+    async def initialize_vector_store():
+        """Initialize the vector store in the background."""
+        try:
+            await vector_store.initialize()
+            logger.info("✅ Vector store initialized")
+        except Exception as e:
+            logger.error(f"❌ Vector store initialization error: {e}")
 
     @app.on_event("startup")
     async def startup_event():
         """Initialize services on app startup."""
-        # Check ffmpeg availability
-        if not check_ffmpeg():
-            logger.warning("⚠️ Application may not work correctly without ffmpeg")
-        
-        # Initialize FAISS vector store
-        await vector_store.initialize()
-        logger.info("✅ Vector store initialized")
+        check_ffmpeg()
+        # Start vector store initialization in the background
+        background_tasks = BackgroundTasks()
+        background_tasks.add_task(initialize_vector_store)
 
     @app.get("/")
     async def root():
-        return {"message": "Welcome to VidFold API"}
+        """Quick health check endpoint."""
+        return {"status": "healthy", "message": "Welcome to VidFold API"}
 
     logger.debug("Server setup completed successfully")
 
