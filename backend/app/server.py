@@ -37,7 +37,7 @@ try:
     from api import auth, search
     from api.endpoints import videos  # Updated import path
     logger.debug("api modules imported")
-    from services.vector_store import vector_store
+    from .services.vector_store import vector_store
     logger.debug("vector_store imported")
 
     import subprocess
