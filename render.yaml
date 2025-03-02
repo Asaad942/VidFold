@@ -4,7 +4,10 @@ services:
     name: vidfold-backend
     env: python3
     rootDir: backend  # Explicitly set the root directory
-    buildCommand: pip install -r requirements.txt && apt-get update && apt-get install -y ffmpeg
+    buildCommand: |
+      pip install -r requirements.txt
+      sudo apt-get update
+      sudo apt-get install -y ffmpeg
     startCommand: python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --log-level debug
     envVars:
       - key: PYTHON_VERSION
