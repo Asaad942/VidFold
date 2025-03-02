@@ -12,9 +12,14 @@ class AuthService:
             raise ValueError("Supabase URL and key must be provided")
             
         try:
+            # Initialize Supabase client with only required parameters
             self.supabase: Client = create_client(
-                supabase_url,
-                supabase_key
+                supabase_url=supabase_url,
+                supabase_key=supabase_key,
+                options={
+                    "auto_refresh_token": True,
+                    "persist_session": True
+                }
             )
         except Exception as e:
             raise Exception(f"Failed to initialize Supabase client: {str(e)}")
@@ -41,7 +46,7 @@ class AuthService:
     
     async def sign_out(self, access_token: str) -> bool:
         try:
-            await self.supabase.auth.sign_out()  # Removed access_token parameter
+            await self.supabase.auth.sign_out()
             return True
         except Exception as e:
             raise Exception(f"Error during sign out: {str(e)}")
@@ -51,7 +56,7 @@ class AuthService:
             response = await self.supabase.auth.get_user(access_token)
             return response.dict() if response else None
         except Exception:
-            return None  # Silently handle invalid tokens
+            return None
     
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         try:
