@@ -17,8 +17,22 @@ router = APIRouter()
 async def process_video_background(video_id: str, url: str):
     """Background task to process video content"""
     try:
+        # Configure yt-dlp with cookies and user agent
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+            'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'format': 'best',  # Get best quality
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+            'no_warnings': True,
+            'quiet': True
+        }
+
         # Get video info
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             title = info.get('title')
             thumbnail = info.get('thumbnail')
@@ -50,10 +64,13 @@ async def process_video_background(video_id: str, url: str):
     except Exception as e:
         logging.error(f"Error processing video {video_id}: {str(e)}")
         # Update video record with error status
-        supabase.table("videos").update({
-            "status": "error",
-            "error_message": str(e)
-        }).eq("id", video_id).execute()
+        try:
+            supabase.table("videos").update({
+                "status": "error",
+                "error": str(e)  # Use 'error' instead of 'error_message'
+            }).eq("id", video_id).execute()
+        except Exception as db_error:
+            logging.error(f"Failed to update error status: {str(db_error)}")
 
 @router.post("/", response_model=VideoLinkResponse)
 async def add_video(
@@ -126,23 +143,25 @@ async def add_video(
 
 @router.get("/", response_model=List[VideoLinkResponse])
 async def get_videos(
-    platform: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    token: str = Depends(auth_service.get_user)
-) -> Dict[str, Any]:
-    """
-    Get user's saved videos with optional filtering and pagination.
-    """
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Get all videos for the current user"""
+    try:
+        # Get user ID from the user object
+        user_id = user.get("user", {}).get("id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found in token")
+            
+        # Query videos for the user
+        result = supabase.table("videos").select("*").eq("user_id", user_id).execute()
         
-    return await video_management_service.get_user_videos(
-        user_id=token["user_id"],
-        platform=platform,
-        limit=limit,
-        offset=offset
-    )
+        if not result.data:
+            return []
+            
+        return result.data
+    except Exception as e:
+        logging.error(f"Error getting videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/{video_id}")
 async def update_video(
