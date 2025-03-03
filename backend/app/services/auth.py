@@ -31,9 +31,9 @@ class AuthService:
             try:
                 # Initialize Supabase client with minimal configuration
                 self.supabase: Client = create_client(
-                    supabase_url=supabase_url,
-                    supabase_key=supabase_key,
-                    options={
+                    supabase_url,
+                    supabase_key,
+                    {
                         "auth": {
                             "autoRefreshToken": True,
                             "persistSession": True,
