@@ -59,7 +59,7 @@ class AuthService:
                     "email_redirect_to": f"{settings.SUPABASE_URL}/auth/callback"
                 }
             })
-            return response.model_dump()
+            return response.dict()
         except Exception as e:
             raise Exception(f"Error during sign up: {str(e)}")
     
@@ -69,7 +69,7 @@ class AuthService:
                 "email": email,
                 "password": password
             })
-            return response.model_dump()
+            return response.dict()
         except Exception as e:
             raise Exception(f"Error during sign in: {str(e)}")
     
@@ -86,7 +86,7 @@ class AuthService:
             if not response or not response.user:
                 return None
             return {
-                "user": response.user.model_dump(),
+                "user": response.user.dict(),
                 "access_token": access_token
             }
         except Exception as e:
@@ -96,7 +96,7 @@ class AuthService:
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         try:
             response = await self.supabase.auth.refresh_session(refresh_token)
-            return response.model_dump()
+            return response.dict()
         except Exception as e:
             raise Exception(f"Error refreshing token: {str(e)}")
 
