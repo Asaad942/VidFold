@@ -29,17 +29,10 @@ class AuthService:
             logger.debug("Attempting to create Supabase client...")
             
             try:
-                # Initialize Supabase client with minimal configuration
+                # Initialize Supabase client with basic configuration
                 self.supabase: Client = create_client(
                     supabase_url,
-                    supabase_key,
-                    {
-                        "auth": {
-                            "autoRefreshToken": True,
-                            "persistSession": True,
-                            "detectSessionInUrl": False
-                        }
-                    }
+                    supabase_key
                 )
                 logger.debug("Supabase client created successfully")
             except TypeError as type_error:
