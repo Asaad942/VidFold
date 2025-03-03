@@ -31,8 +31,15 @@ class AuthService:
             try:
                 # Initialize Supabase client with minimal configuration
                 self.supabase: Client = create_client(
-                    supabase_url,
-                    supabase_key
+                    supabase_url=supabase_url,
+                    supabase_key=supabase_key,
+                    options={
+                        "auth": {
+                            "autoRefreshToken": True,
+                            "persistSession": True,
+                            "detectSessionInUrl": False
+                        }
+                    }
                 )
                 logger.debug("Supabase client created successfully")
             except TypeError as type_error:
@@ -100,9 +107,11 @@ class AuthService:
         except Exception as e:
             raise Exception(f"Error refreshing token: {str(e)}")
 
+# Initialize the auth service
 logger.debug("About to initialize AuthService...")
 try:
     auth_service = AuthService()
     logger.debug("AuthService initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize AuthService: {str(e)}") 
+    logger.error(f"Failed to initialize AuthService: {str(e)}")
+    raise 
