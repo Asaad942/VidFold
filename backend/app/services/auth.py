@@ -52,7 +52,7 @@ class AuthService:
     
     async def sign_up(self, email: str, password: str) -> Dict[str, Any]:
         try:
-            response = await self.supabase.auth.sign_up({
+            response = self.supabase.auth.sign_up({
                 "email": email,
                 "password": password,
                 "options": {
@@ -65,7 +65,7 @@ class AuthService:
     
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         try:
-            response = await self.supabase.auth.sign_in_with_password({
+            response = self.supabase.auth.sign_in_with_password({
                 "email": email,
                 "password": password
             })
@@ -75,14 +75,14 @@ class AuthService:
     
     async def sign_out(self, access_token: str) -> bool:
         try:
-            await self.supabase.auth.sign_out()
+            self.supabase.auth.sign_out()
             return True
         except Exception as e:
             raise Exception(f"Error during sign out: {str(e)}")
     
     async def get_user(self, access_token: str) -> Optional[Dict[str, Any]]:
         try:
-            response = await self.supabase.auth.get_user(access_token)
+            response = self.supabase.auth.get_user(access_token)
             if not response or not response.user:
                 return None
             return {
@@ -95,7 +95,7 @@ class AuthService:
     
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         try:
-            response = await self.supabase.auth.refresh_session(refresh_token)
+            response = self.supabase.auth.refresh_session(refresh_token)
             return response.dict()
         except Exception as e:
             raise Exception(f"Error refreshing token: {str(e)}")
