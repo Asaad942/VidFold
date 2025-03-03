@@ -14,9 +14,51 @@ import logging
 
 router = APIRouter()
 
+async def process_video_background(video_id: str, url: str):
+    """Background task to process video content"""
+    try:
+        # Get video info
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = info.get('title')
+            thumbnail = info.get('thumbnail')
+            duration = info.get('duration')
+
+        # Update video record with basic info
+        supabase.table("videos").update({
+            "title": title,
+            "thumbnail_url": thumbnail,
+            "duration": duration,
+            "status": "processing"
+        }).eq("id", video_id).execute()
+
+        # Run visual analysis
+        visual_analysis = await visual_analysis_service.analyze_video(url)
+        
+        # Run audio transcription
+        transcription = await audio_transcription_service.transcribe_video(url, video_id)
+        
+        # Update video record with analysis results
+        supabase.table("videos").update({
+            "status": "completed",
+            "analysis": {
+                "visual": visual_analysis,
+                "transcription": transcription
+            }
+        }).eq("id", video_id).execute()
+
+    except Exception as e:
+        logging.error(f"Error processing video {video_id}: {str(e)}")
+        # Update video record with error status
+        supabase.table("videos").update({
+            "status": "error",
+            "error_message": str(e)
+        }).eq("id", video_id).execute()
+
 @router.post("/", response_model=VideoLinkResponse)
 async def add_video(
     video: VideoLinkCreate,
+    background_tasks: BackgroundTasks,
     user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
@@ -67,6 +109,9 @@ async def add_video(
         
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to create video")
+            
+        # Add background task for video processing
+        background_tasks.add_task(process_video_background, data["id"], url)
             
         return VideoLinkResponse(
             id=data["id"],
@@ -138,44 +183,6 @@ async def delete_video(
     else:
         raise HTTPException(status_code=400, detail="Failed to delete video")
 
-async def process_video_background(video_id: str, url: str, user_id: str):
-    """
-    Background task to handle heavy video processing
-    """
-    try:
-        # First verify the video belongs to the user
-        result = supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
-        if not result.data:
-            print(f"Video {video_id} not found or does not belong to user {user_id}")
-            return
-
-        # Run visual analysis and transcription
-        visual_analysis = await visual_analysis_service.analyze_video(url)
-        transcription = await audio_transcription_service.transcribe_video(url)
-        
-        # Save analysis results
-        analysis_data = {
-            "video_id": video_id,
-            "visual_summary": str(visual_analysis.get("detected_objects", [])),
-            "audio_transcription": transcription.get("text", ""),
-            "keywords": visual_analysis.get("detected_objects", []) + transcription.get("keywords", []),
-            "metadata": {
-                "visual_analysis": visual_analysis,
-                "transcription": transcription
-            }
-        }
-        
-        # Update the video analysis in Supabase
-        supabase.table("video_analysis").insert(analysis_data).execute()
-        
-        # Update video status to completed
-        supabase.table("videos").update({"status": "completed"}).eq("id", video_id).execute()
-        
-    except Exception as e:
-        print(f"Background processing error: {str(e)}")
-        # Update video status to indicate error
-        supabase.table("videos").update({"status": "error"}).eq("id", video_id).execute()
-
 @router.post("/process")
 async def process_video(
     video: VideoProcessRequest,
@@ -240,7 +247,7 @@ async def process_video(
                 result = supabase.table("videos").update(metadata).eq("id", video.video_id).execute()
         
         # Step 2: Schedule heavy processing for background
-        background_tasks.add_task(process_video_background, video.video_id, video.url, user.get("user", {}).get("id"))
+        background_tasks.add_task(process_video_background, video.video_id, video.url)
             
         return {
             "status": "processing",
