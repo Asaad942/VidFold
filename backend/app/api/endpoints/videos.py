@@ -9,40 +9,63 @@ from ...services.auth import auth_service
 from ...services.video_management import video_management_service
 from ..auth import get_current_user
 import uuid
-import yt_dlp
 import logging
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter()
+
+# Initialize YouTube API client
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+
+async def get_video_metadata(video_id: str) -> Dict[str, Any]:
+    """Get video metadata using YouTube Data API"""
+    try:
+        request = youtube.videos().list(
+            part="snippet,contentDetails",
+            id=video_id
+        )
+        response = request.execute()
+        
+        if not response['items']:
+            raise HTTPException(status_code=404, detail="Video not found")
+            
+        video_data = response['items'][0]
+        snippet = video_data['snippet']
+        content_details = video_data['contentDetails']
+        
+        return {
+            'title': snippet['title'],
+            'thumbnail_url': snippet['thumbnails']['high']['url'],
+            'duration': content_details['duration'],
+            'description': snippet.get('description', ''),
+            'published_at': snippet['publishedAt']
+        }
+    except HttpError as e:
+        logging.error(f"YouTube API error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch video metadata")
 
 async def process_video_background(video_id: str, url: str):
     """Background task to process video content"""
     try:
-        # Configure yt-dlp with cookies and user agent
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True,
-            'cookiesfrombrowser': ('chrome',),  # Use Chrome cookies
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'format': 'best',  # Get best quality
-            'nocheckcertificate': True,
-            'ignoreerrors': True,
-            'no_warnings': True,
-            'quiet': True
-        }
+        # Extract video ID from URL
+        video_id = URLParser.extract_video_id(url, Platform.YOUTUBE)
+        if not video_id:
+            raise ValueError("Invalid YouTube URL")
 
-        # Get video info
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title')
-            thumbnail = info.get('thumbnail')
-            duration = info.get('duration')
-
+        # Get video metadata using YouTube API
+        metadata = await get_video_metadata(video_id)
+        
         # Update video record with basic info
         supabase.table("videos").update({
-            "title": title,
-            "thumbnail_url": thumbnail,
-            "duration": duration,
+            "title": metadata['title'],
+            "thumbnail_url": metadata['thumbnail_url'],
+            "duration": metadata['duration'],
             "status": "processing"
         }).eq("id", video_id).execute()
 
@@ -67,7 +90,7 @@ async def process_video_background(video_id: str, url: str):
         try:
             supabase.table("videos").update({
                 "status": "error",
-                "error": str(e)  # Use 'error' instead of 'error_message'
+                "error": str(e)
             }).eq("id", video_id).execute()
         except Exception as db_error:
             logging.error(f"Failed to update error status: {str(db_error)}")
