@@ -29,10 +29,14 @@ export const videoService = {
             search_summary,
             visual_summary,
             audio_transcription,
-            keywords
+            keywords,
+            confidence_scores,
+            processing_status,
+            metadata
           ),
           video_categories (
             categories (
+              id,
               name
             )
           )
@@ -46,7 +50,7 @@ export const videoService = {
       }
 
       console.log('Videos fetched:', data ? data.length : 0);
-      return data;
+      return data || [];
     } catch (error) {
       console.error('Error in getUserVideos:', error);
       throw error;
@@ -79,8 +83,11 @@ export const videoService = {
             url: videoUrl,
             platform,
             title,
-            status: 'pending',  // Initial status when video is first added
+            status: 'pending',
+            error: null,
+            analysis: null,
             created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
           },
         ])
         .select();
@@ -97,16 +104,17 @@ export const videoService = {
       // Trigger video processing in the backend
       try {
         const { session } = await supabase.auth.getSession();
-        const response = await fetch(`${API_URL}/videos/process?access_token=${session?.access_token}`, {
+        const response = await fetch(`${API_URL}/videos/process`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`
           },
           body: JSON.stringify({
             video_id: data[0].id,
             url: videoUrl,
-            platform: platform.toLowerCase(),
-          }),
+            platform: platform.toLowerCase()
+          })
         });
 
         if (!response.ok) {
@@ -147,7 +155,7 @@ export const videoService = {
     }
   },
 
-  // Search videos
+  // Search videos with improved search
   searchVideos: async (query) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -161,19 +169,21 @@ export const videoService = {
             search_summary,
             visual_summary,
             audio_transcription,
-            keywords
+            keywords,
+            confidence_scores,
+            processing_status
           )
         `)
         .eq('user_id', user.id)
         .textSearch('video_analysis.search_summary', query, {
-          config: 'english',
+          config: 'english'
         })
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data;
+      return data || [];
     } catch (error) {
-      console.error('Error searching videos:', error.message);
+      console.error('Error searching videos:', error);
       throw error;
     }
   },
@@ -201,7 +211,7 @@ export const videoService = {
     }
   },
 
-  // Check video processing status
+  // Check video processing status with detailed info
   checkProcessingStatus: async (videoId) => {
     try {
       const { data, error } = await supabase
@@ -211,7 +221,10 @@ export const videoService = {
           video_analysis (
             visual_summary,
             audio_transcription,
-            keywords
+            keywords,
+            confidence_scores,
+            processing_status,
+            metadata
           )
         `)
         .eq('id', videoId)
@@ -224,4 +237,23 @@ export const videoService = {
       throw error;
     }
   },
+
+  // Remove video from category
+  removeFromCategory: async (videoId, categoryId) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const { error } = await supabase
+        .from('video_categories')
+        .delete()
+        .match({ video_id: videoId, category_id: categoryId });
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      console.error('Error removing video from category:', error);
+      throw error;
+    }
+  }
 }; 
