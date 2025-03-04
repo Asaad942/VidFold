@@ -14,6 +14,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import os
 from dotenv import load_dotenv
+import datetime
+from ...services.cache_service import cache_service
 
 load_dotenv()
 
@@ -24,8 +26,19 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
 
 async def get_video_metadata(video_id: str) -> Dict[str, Any]:
-    """Get video metadata using YouTube Data API"""
+    """Get video metadata using YouTube Data API with caching"""
     try:
+        # Check cache first
+        cache_key = cache_service.generate_video_key(video_id)
+        cached_data = await cache_service.get(cache_key)
+        
+        if cached_data:
+            logging.info(f"Cache hit for video {video_id}")
+            return cached_data
+            
+        logging.info(f"Cache miss for video {video_id}, fetching from YouTube API")
+        
+        # If not in cache, fetch from YouTube API
         request = youtube.videos().list(
             part="snippet,contentDetails",
             id=video_id
@@ -39,34 +52,35 @@ async def get_video_metadata(video_id: str) -> Dict[str, Any]:
         snippet = video_data['snippet']
         content_details = video_data['contentDetails']
         
-        return {
+        metadata = {
             'title': snippet['title'],
             'thumbnail_url': snippet['thumbnails']['high']['url'],
             'duration': content_details['duration'],
             'description': snippet.get('description', ''),
             'published_at': snippet['publishedAt']
         }
+        
+        # Cache the metadata
+        await cache_service.set(cache_key, metadata)
+        
+        return metadata
     except HttpError as e:
         logging.error(f"YouTube API error: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch video metadata")
 
-async def process_video_background(video_id: str, url: str):
+async def process_video_background(video_id: str, url: str, youtube_id: str):
     """Background task to process video content"""
     try:
-        # Extract video ID from URL
-        video_id = URLParser.extract_video_id(url, Platform.YOUTUBE)
-        if not video_id:
-            raise ValueError("Invalid YouTube URL")
-
         # Get video metadata using YouTube API
-        metadata = await get_video_metadata(video_id)
+        metadata = await get_video_metadata(youtube_id)
         
         # Update video record with basic info
         supabase.table("videos").update({
             "title": metadata['title'],
             "thumbnail_url": metadata['thumbnail_url'],
             "duration": metadata['duration'],
-            "status": "processing"
+            "status": "processing",
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }).eq("id", video_id).execute()
 
         # Run visual analysis
@@ -75,13 +89,22 @@ async def process_video_background(video_id: str, url: str):
         # Run audio transcription
         transcription = await audio_transcription_service.transcribe_video(url, video_id)
         
-        # Update video record with analysis results
+        # Create analysis record
+        analysis_data = {
+            "video_id": video_id,
+            "visual_summary": visual_analysis.get("summary"),
+            "audio_transcription": transcription,
+            "metadata": metadata,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        
+        # Insert analysis data
+        supabase.table("video_analysis").insert(analysis_data).execute()
+        
+        # Update video status to completed
         supabase.table("videos").update({
             "status": "completed",
-            "analysis": {
-                "visual": visual_analysis,
-                "transcription": transcription
-            }
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }).eq("id", video_id).execute()
 
     except Exception as e:
@@ -90,7 +113,8 @@ async def process_video_background(video_id: str, url: str):
         try:
             supabase.table("videos").update({
                 "status": "error",
-                "error": str(e)
+                "error": str(e),
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }).eq("id", video_id).execute()
         except Exception as db_error:
             logging.error(f"Failed to update error status: {str(db_error)}")
@@ -107,6 +131,12 @@ async def add_video(
     """
     try:
         url = str(video.url)
+        
+        # Extract user ID from token
+        user_id = user.get("user", {}).get("id")
+        if not user_id:
+            logging.error(f"User ID not found in token: {user}")
+            raise HTTPException(status_code=401, detail="User ID not found in token")
         
         # If platform is not specified, detect it from the URL
         if video.platform == Platform.UNKNOWN:
@@ -133,36 +163,71 @@ async def add_video(
                 detail="Could not extract video ID from URL"
             )
         
+        # Create unique ID for the video record
+        record_id = str(uuid.uuid4())
+        
         # Create the video record in Supabase
         data = {
-            "id": str(uuid.uuid4()),
+            "id": record_id,
             "url": url,
             "platform": video.platform,
-            "user_id": user.get("user", {}).get("id"),
-            "title": None,  # Will be updated after processing
-            "thumbnail_url": None,  # Will be updated after processing
-            "duration": None,  # Will be updated after processing
-            "status": "pending"  # Initial status
+            "user_id": user_id,
+            "title": None,
+            "thumbnail_url": None,
+            "duration": None,
+            "status": "pending",
+            "error": None,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
         
-        result = supabase.table("videos").insert(data).execute()
+        logging.info(f"Attempting to create video record with data: {data}")
         
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to create video")
+        # First, verify we can connect to the database
+        try:
+            test_result = supabase.table("videos").select("id").limit(1).execute()
+            logging.info(f"Database connection test successful. Found {len(test_result.data)} videos")
+        except Exception as e:
+            logging.error(f"Database connection test failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Database connection error")
+        
+        # Try to create the video record
+        try:
+            result = supabase.table("videos").insert(data).execute()
+            logging.info(f"Insert response: {result}")
+            
+            if not result.data:
+                logging.error(f"Failed to create video record. Supabase response: {result}")
+                raise HTTPException(status_code=500, detail="Failed to create video record in database")
+                
+            # Verify the record was created
+            verify_result = supabase.table("videos").select("*").eq("id", record_id).execute()
+            if not verify_result.data:
+                logging.error(f"Video record not found after creation. ID: {record_id}")
+                raise HTTPException(status_code=500, detail="Video record not found after creation")
+                
+            logging.info(f"Successfully created and verified video record with ID: {record_id}")
+                
+        except Exception as db_error:
+            logging.error(f"Database error creating video: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
             
         # Add background task for video processing
-        background_tasks.add_task(process_video_background, data["id"], url)
+        youtube_id = URLParser.extract_video_id(url, Platform.YOUTUBE)
+        background_tasks.add_task(process_video_background, record_id, url, youtube_id)
             
         return VideoLinkResponse(
-            id=data["id"],
+            id=record_id,
             url=url,
             platform=video.platform,
             status="pending"
         )
     except HTTPException as e:
+        logging.error(f"HTTP error in add_video: {str(e)}")
         raise e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.error(f"Unexpected error in add_video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/", response_model=List[VideoLinkResponse])
 async def get_videos(
@@ -237,6 +302,15 @@ async def process_video(
     2. Run heavy processing in background (slow)
     """
     try:
+        # First, verify the video exists and belongs to the user
+        result = supabase.table("videos").select("*").eq("id", video.video_id).single().execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+            
+        db_video = result.data
+        if db_video.get("user_id") != user.get("user", {}).get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized to process this video")
+
         # Extract video ID from URL
         youtube_id = URLParser.extract_video_id(video.url, Platform.YOUTUBE)
         if not youtube_id:
@@ -245,20 +319,24 @@ async def process_video(
         # Get video metadata using YouTube API
         metadata = await get_video_metadata(youtube_id)
         
-        # Update video with metadata immediately
-        result = supabase.table("videos").update({
+        # Update video with metadata immediately (excluding description)
+        update_result = supabase.table("videos").update({
             "title": metadata['title'],
             "thumbnail_url": metadata['thumbnail_url'],
             "duration": metadata['duration'],
-            "description": metadata.get('description', ''),
             "status": "processing"  # Indicate background processing is ongoing
         }).eq("id", video.video_id).execute()
         
-        if not result.data:
+        if not update_result.data:
             raise HTTPException(status_code=500, detail="Failed to update video metadata")
         
         # Schedule heavy processing for background
-        background_tasks.add_task(process_video_background, video.video_id, video.url)
+        background_tasks.add_task(
+            process_video_background,
+            video.video_id,  # Use the record ID, not the YouTube ID
+            video.url,
+            youtube_id
+        )
             
         return {
             "status": "processing",
@@ -266,6 +344,9 @@ async def process_video(
             "metadata": metadata
         }
             
+    except HTTPException as e:
+        # Re-raise HTTP exceptions as is
+        raise e
     except Exception as e:
         logging.error(f"Error in process_video: {str(e)}")
         # Update video status to indicate error

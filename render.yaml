@@ -30,4 +30,12 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "1440"
       - key: REFRESH_TOKEN_EXPIRE_MINUTES
-        value: "43200" 
+        value: "43200"
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_HOST
+        sync: false
+      - key: UPSTASH_REDIS_PORT
+        value: 6379
+      - key: UPSTASH_REDIS_PASSWORD
+        sync: false 

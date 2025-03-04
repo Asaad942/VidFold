@@ -5,7 +5,8 @@ node_modules/
 
 # Environment variables
 .env
-.env.*
+.env.local
+.env.*.local
 !.env.example
 
 # Python
@@ -96,3 +97,7 @@ backend/ffmpeg.exe
 
 # Custom
 app-example
+
+# Redis
+dump.rdb
+*.rdb
