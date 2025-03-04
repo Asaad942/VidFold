@@ -1,11 +1,14 @@
 from typing import Dict, Any, Optional
-from ..database.sql import get_db
+from ..database import supabase
 from fastapi import HTTPException
+import logging
 from .vector_store import vector_store
+
+logger = logging.getLogger(__name__)
 
 class VideoManagementService:
     def __init__(self):
-        self.db = get_db()
+        self.supabase = supabase
 
     async def update_video(
         self,
@@ -24,56 +27,30 @@ class VideoManagementService:
         Returns:
             Updated video details
         """
-        # Verify video ownership
-        video = await self._get_video(video_id, user_id)
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
+        try:
+            # First verify the video exists and belongs to the user
+            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
+            
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Video not found")
+                
+            # Update the video
+            update_result = self.supabase.table("videos").update(updates).eq("id", video_id).execute()
+            
+            if not update_result.data:
+                raise HTTPException(status_code=500, detail="Failed to update video")
+                
+            return update_result.data[0]
+            
+        except Exception as e:
+            logger.error(f"Error updating video: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-        # Build update query
-        allowed_fields = {"title", "description", "keywords"}
-        update_fields = {k: v for k, v in updates.items() if k in allowed_fields}
-        
-        if not update_fields:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
-
-        # Update video table
-        video_query = """
-            UPDATE videos
-            SET title = COALESCE($1, title),
-                description = COALESCE($2, description)
-            WHERE id = $3 AND user_id = $4
-            RETURNING id, title, description, url, thumbnail_url, platform
-        """
-        
-        video_result = await self.db.fetch_one(
-            video_query,
-            updates.get("title"),
-            updates.get("description"),
-            video_id,
-            user_id
-        )
-
-        # Update video analysis if keywords changed
-        if "keywords" in updates:
-            analysis_query = """
-                UPDATE video_analysis
-                SET keywords = $1,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE video_id = $2
-                RETURNING keywords
-            """
-            await self.db.execute(analysis_query, updates["keywords"], video_id)
-
-        return {
-            "id": str(video_result["id"]),
-            "title": video_result["title"],
-            "description": video_result["description"],
-            "url": video_result["url"],
-            "thumbnail_url": video_result["thumbnail_url"],
-            "platform": video_result["platform"]
-        }
-
-    async def delete_video(self, video_id: str, user_id: str) -> bool:
+    async def delete_video(
+        self,
+        video_id: str,
+        user_id: str
+    ) -> bool:
         """
         Delete a video and its associated data.
         
@@ -84,26 +61,21 @@ class VideoManagementService:
         Returns:
             True if deletion was successful
         """
-        # Verify video ownership
-        video = await self._get_video(video_id, user_id)
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
-
-        # Delete video (cascade will handle related records)
-        query = """
-            DELETE FROM videos
-            WHERE id = $1 AND user_id = $2
-            RETURNING id
-        """
-        
-        result = await self.db.fetch_one(query, video_id, user_id)
-        
-        if result:
-            # Remove from vector store
-            await vector_store.remove_embedding(video_id)
-            return True
+        try:
+            # First verify the video exists and belongs to the user
+            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
             
-        return False
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Video not found")
+                
+            # Delete the video (cascade will handle related records)
+            delete_result = self.supabase.table("videos").delete().eq("id", video_id).execute()
+            
+            return bool(delete_result.data)
+            
+        except Exception as e:
+            logger.error(f"Error deleting video: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def get_user_videos(
         self,
@@ -157,15 +129,10 @@ class VideoManagementService:
         base_query += " ORDER BY v.created_at DESC LIMIT $2 OFFSET $3"
         
         # Get total count
-        total = await self.db.fetch_val(count_query, *params)
+        total = await self.supabase.table("videos").select("*", count="exact").eq("user_id", user_id).execute()
         
         # Get videos
-        videos = await self.db.fetch_all(
-            base_query,
-            *params,
-            limit,
-            offset
-        )
+        videos = await self.supabase.table("videos").select("*").eq("user_id", user_id).order("created_at", desc=True).range(offset, offset + limit).execute()
 
         return {
             "videos": [
@@ -179,9 +146,9 @@ class VideoManagementService:
                     "created_at": v["created_at"].isoformat(),
                     "keywords": v["keywords"] or []
                 }
-                for v in videos
+                for v in videos.data
             ],
-            "total": total,
+            "total": total.data[0]["count"],
             "limit": limit,
             "offset": offset
         }
@@ -193,6 +160,6 @@ class VideoManagementService:
             FROM videos
             WHERE id = $1 AND user_id = $2
         """
-        return await self.db.fetch_one(query, video_id, user_id)
+        return await self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
 
 video_management_service = VideoManagementService() 

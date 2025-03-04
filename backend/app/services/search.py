@@ -1,8 +1,9 @@
 from typing import List, Dict, Any
-import numpy as np
-from ..database.sql import get_db
-from ..utils.embeddings import get_embedding
+from ..database import supabase
 from .vector_store import vector_store
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MatchType:
     PERFECT = "PERFECT"
@@ -13,7 +14,7 @@ class MatchType:
 
 class SearchService:
     def __init__(self):
-        self.db = get_db()
+        self.db = supabase
         
     async def search_videos(
         self,
@@ -32,78 +33,46 @@ class SearchService:
         Returns:
             List of matching videos with relevance scores (internal match details hidden)
         """
-        # Get query embedding
-        query_embedding = get_embedding(query)
-        
-        # Get similar videos from FAISS
-        similar_videos = await vector_store.search(query_embedding)
-        
-        if not similar_videos:
-            return []
+        try:
+            # Get query embedding
+            query_embedding = await self._get_query_embedding(query)
             
-        # Build video IDs list and similarity score map
-        video_ids = [vid_id for vid_id, _ in similar_videos]
-        similarity_scores = {vid_id: score for vid_id, score in similar_videos}
-        
-        # Build base query
-        base_query = """
-            SELECT 
-                v.id,
-                v.title,
-                v.url,
-                v.thumbnail_url,
-                v.platform,
-                va.search_summary,
-                va.visual_summary,
-                va.audio_transcription,
-                va.keywords,
-                va.metadata
-            FROM videos v
-            JOIN video_analysis va ON v.id = va.video_id
-            WHERE v.user_id = $1
-            AND v.id = ANY($2)
-        """
-        
-        params = [user_id, video_ids]
-        
-        if platform:
-            base_query += " AND v.platform = $3"
-            params.append(platform)
+            # Search vector store
+            similar_videos = await vector_store.search(query_embedding)
             
-        # Execute search query
-        results = await self.db.fetch_all(base_query, *params)
-        
-        # Calculate relevance scores and determine match types
-        scored_results = []
-        for result in results:
-            video_id = str(result["id"])
-            similarity = similarity_scores.get(video_id, 0.0)
+            if not similar_videos:
+                return []
             
-            # Calculate score and get match details
-            score, match_details = self._calculate_relevance_score(
-                query=query,
-                similarity=similarity,
-                title=result["title"],
-                search_summary=result["search_summary"],
-                visual_summary=result["visual_summary"],
-                audio_transcription=result["audio_transcription"],
-                keywords=result["keywords"],
-                metadata=result.get("metadata", {})
+            # Get video details from database
+            video_ids = [video_id for video_id, _ in similar_videos]
+            
+            # Query Supabase for video details
+            result = self.db.table("videos").select("*").in_("id", video_ids).eq("user_id", user_id).execute()
+            
+            if not result.data:
+                return []
+            
+            # Sort videos by similarity score
+            video_scores = {video_id: score for video_id, score in similar_videos}
+            videos = sorted(
+                result.data,
+                key=lambda v: video_scores.get(v["id"], 0),
+                reverse=True
             )
             
-            # Create the result object (excluding internal match details)
-            scored_results.append({
-                "id": video_id,
-                "title": result["title"],
-                "url": result["url"],
-                "thumbnail_url": result["thumbnail_url"],
-                "platform": result["platform"],
-                "relevance_score": score
-            })
+            return videos
             
-        # Sort by relevance score
-        scored_results.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return scored_results
+        except Exception as e:
+            logger.error(f"Error in search_videos: {str(e)}")
+            return []
+        
+    async def _get_query_embedding(self, query: str) -> List[float]:
+        """
+        Get embedding for a search query.
+        """
+        # TODO: Implement query embedding generation
+        # For now, return a dummy embedding
+        return [0.0] * 384  # Same dimension as video embeddings
         
     def _calculate_relevance_score(
         self,
