@@ -272,23 +272,54 @@ async def update_video(
 @router.delete("/{video_id}")
 async def delete_video(
     video_id: str,
-    token: str = Depends(auth_service.get_user)
-) -> Dict[str, str]:
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """
-    Delete a saved video.
+    Soft delete a video and its associated data.
     """
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-        
-    success = await video_management_service.delete_video(
-        video_id=video_id,
-        user_id=token["user_id"]
-    )
-    
-    if success:
+    try:
+        success = await video_management_service.delete_video(video_id, user["user"]["id"])
+        if not success:
+            raise HTTPException(status_code=404, detail="Video not found")
         return {"message": "Video deleted successfully"}
-    else:
-        raise HTTPException(status_code=400, detail="Failed to delete video")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{video_id}/restore")
+async def restore_video(
+    video_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Restore a soft-deleted video.
+    """
+    try:
+        video = await video_management_service.restore_video(video_id, user["user"]["id"])
+        return video
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/")
+async def list_videos(
+    user: Dict[str, Any] = Depends(get_current_user),
+    platform: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    include_deleted: bool = False
+):
+    """
+    List user's videos with optional deleted items.
+    """
+    try:
+        return await video_management_service.get_user_videos(
+            user["user"]["id"],
+            platform=platform,
+            limit=limit,
+            offset=offset,
+            include_deleted=include_deleted
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/process")
 async def process_video(

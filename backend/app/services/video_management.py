@@ -1,7 +1,8 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from ..database import supabase
 from fastapi import HTTPException
 import logging
+from datetime import datetime
 from .vector_store import vector_store
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class VideoManagementService:
         """
         try:
             # First verify the video exists and belongs to the user
-            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
+            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).is_("deleted_at", "null").execute()
             
             if not result.data:
                 raise HTTPException(status_code=404, detail="Video not found")
@@ -52,7 +53,7 @@ class VideoManagementService:
         user_id: str
     ) -> bool:
         """
-        Delete a video and its associated data.
+        Soft delete a video and its associated data.
         
         Args:
             video_id: ID of the video to delete
@@ -63,18 +64,74 @@ class VideoManagementService:
         """
         try:
             # First verify the video exists and belongs to the user
-            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).execute()
+            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).is_("deleted_at", "null").execute()
             
             if not result.data:
                 raise HTTPException(status_code=404, detail="Video not found")
                 
-            # Delete the video (cascade will handle related records)
-            delete_result = self.supabase.table("videos").delete().eq("id", video_id).execute()
+            # Soft delete the video
+            delete_result = self.supabase.table("videos").update({
+                "deleted_at": datetime.utcnow().isoformat()
+            }).eq("id", video_id).execute()
             
+            if delete_result.data:
+                # Soft delete associated video analysis
+                await self.supabase.table("video_analysis").update({
+                    "deleted_at": datetime.utcnow().isoformat()
+                }).eq("video_id", video_id).execute()
+                
+                # Soft delete video categories
+                await self.supabase.table("video_categories").update({
+                    "deleted_at": datetime.utcnow().isoformat()
+                }).eq("video_id", video_id).execute()
+                
+                # Remove from vector store
+                await vector_store.remove_embedding(video_id)
+                
             return bool(delete_result.data)
             
         except Exception as e:
             logger.error(f"Error deleting video: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def restore_video(
+        self,
+        video_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Restore a soft-deleted video.
+        """
+        try:
+            # Check if video exists and was deleted
+            result = self.supabase.table("videos").select("*").eq("id", video_id).eq("user_id", user_id).not_.is_("deleted_at", "null").execute()
+            
+            if not result.data:
+                raise HTTPException(status_code=404, detail="Deleted video not found")
+                
+            # Restore the video
+            restore_result = self.supabase.table("videos").update({
+                "deleted_at": None
+            }).eq("id", video_id).execute()
+            
+            if restore_result.data:
+                # Restore associated video analysis
+                await self.supabase.table("video_analysis").update({
+                    "deleted_at": None
+                }).eq("video_id", video_id).execute()
+                
+                # Restore video categories
+                await self.supabase.table("video_categories").update({
+                    "deleted_at": None
+                }).eq("video_id", video_id).execute()
+                
+                # Rebuild vector store index
+                await vector_store.initialize()
+                
+            return restore_result.data[0]
+            
+        except Exception as e:
+            logger.error(f"Error restoring video: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
     async def get_user_videos(
@@ -82,76 +139,61 @@ class VideoManagementService:
         user_id: str,
         platform: Optional[str] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        include_deleted: bool = False
     ) -> Dict[str, Any]:
         """
-        Get user's saved videos with pagination.
+        Get user's videos with optional deleted items.
         
         Args:
             user_id: ID of the user
             platform: Optional platform filter
             limit: Number of videos to return
             offset: Pagination offset
+            include_deleted: Include deleted videos
             
         Returns:
             Dictionary containing videos and total count
         """
-        # Build base query
-        base_query = """
-            SELECT 
-                v.id,
-                v.title,
-                v.description,
-                v.url,
-                v.thumbnail_url,
-                v.platform,
-                v.created_at,
-                va.keywords
-            FROM videos v
-            LEFT JOIN video_analysis va ON v.id = va.video_id
-            WHERE v.user_id = $1
-        """
-        
-        count_query = """
-            SELECT COUNT(*) 
-            FROM videos 
-            WHERE user_id = $1
-        """
-        
-        params = [user_id]
-        
-        if platform:
-            base_query += " AND v.platform = $2"
-            count_query += " AND platform = $2"
-            params.append(platform)
-
-        # Add pagination
-        base_query += " ORDER BY v.created_at DESC LIMIT $2 OFFSET $3"
-        
-        # Get total count
-        total = await self.supabase.table("videos").select("*", count="exact").eq("user_id", user_id).execute()
-        
-        # Get videos
-        videos = await self.supabase.table("videos").select("*").eq("user_id", user_id).order("created_at", desc=True).range(offset, offset + limit).execute()
-
-        return {
-            "videos": [
-                {
-                    "id": str(v["id"]),
-                    "title": v["title"],
-                    "description": v["description"],
-                    "url": v["url"],
-                    "thumbnail_url": v["thumbnail_url"],
-                    "platform": v["platform"],
-                    "created_at": v["created_at"].isoformat(),
-                    "keywords": v["keywords"] or []
-                }
-                for v in videos.data
-            ],
-            "total": total.data[0]["count"],
-            "limit": limit,
-            "offset": offset
-        }
+        try:
+            query = self.supabase.table("videos").select("*").eq("user_id", user_id)
+            
+            if not include_deleted:
+                query = query.is_("deleted_at", "null")
+                
+            if platform:
+                query = query.eq("platform", platform)
+                
+            # Get total count
+            count_result = query.count().execute()
+            total = count_result.count if hasattr(count_result, 'count') else 0
+            
+            # Get videos
+            videos = query.order("created_at", desc=True).range(offset, offset + limit).execute()
+            
+            return {
+                "videos": [
+                    {
+                        "id": str(v["id"]),
+                        "title": v["title"],
+                        "description": v["description"],
+                        "url": v["url"],
+                        "thumbnail_url": v["thumbnail_url"],
+                        "platform": v["platform"],
+                        "created_at": v["created_at"].isoformat(),
+                        "keywords": v["keywords"] or [],
+                        "deleted_at": v.get("deleted_at")
+                    }
+                    for v in videos.data
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting user videos: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def _get_video(self, video_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Get video details and verify ownership."""

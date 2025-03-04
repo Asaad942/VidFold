@@ -18,7 +18,8 @@ CREATE TABLE videos (
   thumbnail_url TEXT,
   duration INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
 );
 
 -- Create the video_analysis table
@@ -31,7 +32,8 @@ CREATE TABLE video_analysis (
   keywords TEXT[],
   metadata JSONB,
   embedding vector(1536),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
 );
 
 -- Create the categories table
@@ -39,20 +41,27 @@ CREATE TABLE categories (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL
 );
 
 -- Create the video_categories table
 CREATE TABLE video_categories (
   video_id UUID REFERENCES videos(id) ON DELETE CASCADE,
   category_id UUID REFERENCES categories(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
   PRIMARY KEY (video_id, category_id)
 );
 
 -- Create indexes for better performance
 CREATE INDEX idx_videos_user_id ON videos(user_id);
+CREATE INDEX idx_videos_deleted_at ON videos(deleted_at);
 CREATE INDEX idx_video_analysis_video_id ON video_analysis(video_id);
+CREATE INDEX idx_video_analysis_deleted_at ON video_analysis(deleted_at);
 CREATE INDEX idx_categories_user_id ON categories(user_id);
+CREATE INDEX idx_categories_deleted_at ON categories(deleted_at);
+CREATE INDEX idx_video_categories_deleted_at ON video_categories(deleted_at);
 CREATE INDEX idx_embedding ON video_analysis USING ivfflat (embedding vector_cosine_ops);
 
 -- Create default categories
@@ -90,7 +99,7 @@ DROP POLICY IF EXISTS "Users can manage own video categories" ON video_categorie
 -- Create policies for videos
 CREATE POLICY "Users can view own videos"
   ON videos FOR SELECT
-  USING (auth.uid() = user_id);
+  USING (auth.uid() = user_id AND deleted_at IS NULL);
 
 CREATE POLICY "Users can insert own videos"
   ON videos FOR INSERT
@@ -98,11 +107,12 @@ CREATE POLICY "Users can insert own videos"
 
 CREATE POLICY "Users can update own videos"
   ON videos FOR UPDATE
-  USING (auth.uid() = user_id);
+  USING (auth.uid() = user_id AND deleted_at IS NULL);
 
 CREATE POLICY "Users can delete own videos"
-  ON videos FOR DELETE
-  USING (auth.uid() = user_id);
+  ON videos FOR UPDATE
+  USING (auth.uid() = user_id AND deleted_at IS NULL)
+  WITH CHECK (auth.uid() = user_id AND deleted_at IS NOT NULL);
 
 -- Create policies for video_analysis
 CREATE POLICY "Users can view own video analysis"
@@ -111,12 +121,13 @@ CREATE POLICY "Users can view own video analysis"
     SELECT 1 FROM videos
     WHERE videos.id = video_analysis.video_id
     AND videos.user_id = auth.uid()
-  ));
+    AND videos.deleted_at IS NULL
+  ) AND video_analysis.deleted_at IS NULL);
 
 -- Create policies for categories
 CREATE POLICY "Users can view own categories"
   ON categories FOR SELECT
-  USING (user_id IS NULL OR auth.uid() = user_id);
+  USING ((user_id IS NULL OR auth.uid() = user_id) AND deleted_at IS NULL);
 
 CREATE POLICY "Users can insert own categories"
   ON categories FOR INSERT
@@ -129,7 +140,8 @@ CREATE POLICY "Users can view own video categories"
     SELECT 1 FROM videos
     WHERE videos.id = video_categories.video_id
     AND videos.user_id = auth.uid()
-  ));
+    AND videos.deleted_at IS NULL
+  ) AND video_categories.deleted_at IS NULL);
 
 CREATE POLICY "Users can manage own video categories"
   ON video_categories FOR ALL
@@ -137,4 +149,5 @@ CREATE POLICY "Users can manage own video categories"
     SELECT 1 FROM videos
     WHERE videos.id = video_categories.video_id
     AND videos.user_id = auth.uid()
-  )); 
+    AND videos.deleted_at IS NULL
+  ) AND video_categories.deleted_at IS NULL); 
