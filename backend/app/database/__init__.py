@@ -1,27 +1,29 @@
 """
 Database module for VidFold backend
 """
-from supabase import create_client, Client
-from ..core.config import settings
+from supabase import create_client
+import os
+from dotenv import load_dotenv
+import logging
+
+# Load environment variables
+load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Initialize Supabase client
-supabase_url = settings.SUPABASE_URL.strip()
-supabase_key = settings.SUPABASE_KEY.strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-if not supabase_url or not supabase_key:
-    raise ValueError("Supabase URL and key must be provided")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing Supabase credentials. Please check your .env file.")
 
 try:
-    supabase: Client = create_client(supabase_url, supabase_key)
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("✅ Supabase client initialized successfully")
 except Exception as e:
-    raise Exception(f"Failed to initialize Supabase client: {str(e)}")
+    logger.error(f"❌ Failed to initialize Supabase client: {str(e)}")
+    raise
 
-def get_db() -> Client:
-    """
-    Get a database client instance.
-    Returns:
-        Client: A Supabase client instance
-    """
-    return supabase
-
-__all__ = ['supabase', 'get_db'] 
+# Export the client
+__all__ = ['supabase'] 

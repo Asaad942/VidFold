@@ -35,10 +35,11 @@ try:
     from app.core.config import settings
     logger.debug("settings imported")
     from app.api import auth, search
-    from app.api.endpoints import videos  # Updated import path
+    from app.api.endpoints import videos
     logger.debug("api modules imported")
     from app.services.vector_store import vector_store
     logger.debug("vector_store imported")
+    from app.database import supabase  # Updated import
 
     import subprocess
 
@@ -69,7 +70,7 @@ try:
     )
 
     app.include_router(
-        videos.router,  # Using the correct videos router
+        videos.router,
         prefix=f"{settings.API_V1_STR}/videos",
         tags=["videos"]
     )

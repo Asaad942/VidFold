@@ -5,7 +5,7 @@ services:
     env: python3
     runtime: python3
     buildCommand: pip install --no-cache-dir -r requirements.txt
-    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --log-level info --timeout-keep-alive 75
+    startCommand: uvicorn app.server:app --host 0.0.0.0 --port $PORT --log-level info
     rootDir: backend
     healthCheckPath: /
     healthCheckTimeout: 100
@@ -14,9 +14,9 @@ services:
       - key: PORT
         value: "8000"
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: "3.11.0"
       - key: PYTHONPATH
-        value: /app
+        value: .
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
@@ -36,6 +36,6 @@ services:
       - key: UPSTASH_REDIS_HOST
         sync: false
       - key: UPSTASH_REDIS_PORT
-        value: 6379
+        value: "6379"
       - key: UPSTASH_REDIS_PASSWORD
         sync: false 
