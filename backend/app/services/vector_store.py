@@ -1,11 +1,10 @@
 import faiss
 import numpy as np
 from typing import List, Tuple, Dict, Any
-from ..database.sql import get_db
+from ..database import supabase
 
 class VectorStore:
     def __init__(self):
-        self.db = get_db()
         self.dimension = 384  # dimension of all-MiniLM-L6-v2 embeddings
         self.index = None
         self.id_map: Dict[int, str] = {}  # Maps FAISS index to video IDs
@@ -16,27 +15,28 @@ class VectorStore:
         self.index = faiss.IndexFlatIP(self.dimension)  # Inner product index for cosine similarity
         
         # Get all embeddings from database
-        query = """
-            SELECT va.video_id, va.embedding
-            FROM video_analysis va
-            JOIN videos v ON v.id = va.video_id
-        """
-        results = await self.db.fetch_all(query)
-        
-        if not results:
-            return
+        try:
+            result = supabase.table("video_analysis").select("video_id,embedding").execute()
+            if not result.data:
+                return
+                
+            # Build index
+            embeddings = []
+            self.id_map = {}
             
-        # Build index
-        embeddings = []
-        self.id_map = {}
-        
-        for idx, result in enumerate(results):
-            embedding = np.array(result['embedding'], dtype=np.float32)
-            embeddings.append(embedding)
-            self.id_map[idx] = str(result['video_id'])
-            
-        embeddings_array = np.vstack(embeddings)
-        self.index.add(embeddings_array)
+            for idx, record in enumerate(result.data):
+                if not record.get('embedding'):
+                    continue
+                embedding = np.array(record['embedding'], dtype=np.float32)
+                embeddings.append(embedding)
+                self.id_map[idx] = str(record['video_id'])
+                
+            if embeddings:
+                embeddings_array = np.vstack(embeddings)
+                self.index.add(embeddings_array)
+        except Exception as e:
+            print(f"Error initializing vector store: {str(e)}")
+            raise
         
     async def search(
         self,
