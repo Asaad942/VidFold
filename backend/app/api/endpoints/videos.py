@@ -233,62 +233,31 @@ async def process_video(
 ):
     """
     Process a video in two steps:
-    1. Extract basic metadata (fast)
+    1. Extract basic metadata using YouTube API (fast)
     2. Run heavy processing in background (slow)
     """
     try:
-        # Step 1: Extract metadata using yt-dlp (fast)
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': True,
-            'force_generic_extractor': video.platform.lower() == 'instagram'
-        }
+        # Extract video ID from URL
+        youtube_id = URLParser.extract_video_id(video.url, Platform.YOUTUBE)
+        if not youtube_id:
+            raise ValueError("Invalid YouTube URL")
+
+        # Get video metadata using YouTube API
+        metadata = await get_video_metadata(youtube_id)
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                logger.info(f"Attempting to extract info for URL: {video.url}")
-                info = ydl.extract_info(video.url, download=False)
-                logger.info(f"Successfully extracted info: {info.get('title', 'No title found')}")
-                
-                # For Instagram, handle the case where title might not be available
-                title = info.get('title')
-                if not title and video.platform.lower() == 'instagram':
-                    title = "Instagram Video"
-                
-                # Update video with metadata immediately
-                metadata = {
-                    "title": title,
-                    "thumbnail_url": info.get("thumbnail"),
-                    "duration": info.get("duration", 0),
-                    "status": "processing",  # Indicate background processing is ongoing
-                    "description": info.get("description", "")
-                }
-                
-                logger.info(f"Updating video {video.video_id} with metadata: {metadata}")
-                
-                # Verify the video belongs to the user before updating
-                result = supabase.table("videos").select("*").eq("id", video.video_id).eq("user_id", user.get("user", {}).get("id")).execute()
-                if not result.data:
-                    raise HTTPException(status_code=404, detail="Video not found or access denied")
-                
-                result = supabase.table("videos").update(metadata).eq("id", video.video_id).execute()
-                
-                if not result.data:
-                    raise HTTPException(status_code=500, detail="Failed to update video metadata")
-                
-                logger.info(f"Successfully updated video metadata for {video.video_id}")
-                
-            except Exception as e:
-                logger.error(f"Error extracting metadata: {str(e)}")
-                # Update with basic metadata if extraction fails
-                metadata = {
-                    "title": f"Untitled {video.platform} Video",
-                    "status": "processing",
-                }
-                result = supabase.table("videos").update(metadata).eq("id", video.video_id).execute()
+        # Update video with metadata immediately
+        result = supabase.table("videos").update({
+            "title": metadata['title'],
+            "thumbnail_url": metadata['thumbnail_url'],
+            "duration": metadata['duration'],
+            "description": metadata.get('description', ''),
+            "status": "processing"  # Indicate background processing is ongoing
+        }).eq("id", video.video_id).execute()
         
-        # Step 2: Schedule heavy processing for background
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to update video metadata")
+        
+        # Schedule heavy processing for background
         background_tasks.add_task(process_video_background, video.video_id, video.url)
             
         return {
@@ -298,9 +267,15 @@ async def process_video(
         }
             
     except Exception as e:
-        logger.error(f"Error in process_video: {str(e)}")
+        logging.error(f"Error in process_video: {str(e)}")
         # Update video status to indicate error
-        supabase.table("videos").update({"status": "error"}).eq("id", video.video_id).execute()
+        try:
+            supabase.table("videos").update({
+                "status": "error",
+                "error": str(e)
+            }).eq("id", video.video_id).execute()
+        except Exception as db_error:
+            logging.error(f"Failed to update error status: {str(db_error)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/transcribe")
