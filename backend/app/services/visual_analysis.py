@@ -11,6 +11,7 @@ import cv2
 from io import BytesIO
 import tensorflow as tf
 import tensorflow_hub as hub
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,29 @@ class VisualAnalysisService:
         if not self.huggingface_token:
             raise ValueError("HUGGINGFACE_API_KEY must be provided")
         
-        # Load the MobileNet model for image classification
-        self.model = hub.load('https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/classification/4')
-        self.input_size = (224, 224)
-        
-        # Load COCO dataset labels
-        self.labels = self._load_coco_labels()
+        # Initialize TensorFlow with CPU only
+        try:
+            # Disable GPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+            
+            # Configure TensorFlow to use CPU only
+            tf.config.set_visible_devices([], 'GPU')
+            
+            # Load the MobileNet model for image classification
+            self.model = hub.load('https://tfhub.dev/google/imagenet/mobilenet_v2_100_224/classification/4')
+            self.input_size = (224, 224)
+            
+            # Load COCO dataset labels
+            self.labels = self._load_coco_labels()
+            
+            logger.info("Successfully initialized TensorFlow and loaded model")
+            
+        except Exception as e:
+            logger.error(f"Error initializing TensorFlow: {str(e)}")
+            # Fallback to using only Hugging Face API
+            self.model = None
+            self.input_size = None
+            self.labels = []
 
     def _load_coco_labels(self) -> List[str]:
         """Load COCO dataset labels for object detection"""
@@ -112,29 +130,40 @@ class VisualAnalysisService:
                     # Convert base64 to image
                     image = self._base64_to_image(frame['frame_data'])
                     
-                    # Preprocess image
-                    processed_image = self._preprocess_image(image)
-                    
-                    # Get model predictions
-                    predictions = self.model(processed_image)
-                    
-                    # Get top 5 predictions
-                    top_5_indices = np.argsort(predictions[0])[-5:][::-1]
-                    top_5_labels = [self.labels[i] for i in top_5_indices]
-                    top_5_scores = predictions[0][top_5_indices].numpy()
-                    
-                    # Add frame analysis results
-                    frame_analysis = {
-                        'timestamp': frame['timestamp'],
-                        'frame_number': frame['frame_number'],
-                        'objects': [
-                            {'label': label, 'confidence': float(score)}
-                            for label, score in zip(top_5_labels, top_5_scores)
-                        ]
-                    }
-                    
-                    all_objects.extend(top_5_labels)
-                    all_scenes.append(frame_analysis)
+                    # Try to use TensorFlow model if available
+                    if self.model and self.input_size:
+                        try:
+                            # Preprocess image
+                            processed_image = self._preprocess_image(image)
+                            
+                            # Get model predictions
+                            predictions = self.model(processed_image)
+                            
+                            # Get top 5 predictions
+                            top_5_indices = np.argsort(predictions[0])[-5:][::-1]
+                            top_5_labels = [self.labels[i] for i in top_5_indices]
+                            top_5_scores = predictions[0][top_5_indices].numpy()
+                            
+                            # Add frame analysis results
+                            frame_analysis = {
+                                'timestamp': frame['timestamp'],
+                                'frame_number': frame['frame_number'],
+                                'objects': [
+                                    {'label': label, 'confidence': float(score)}
+                                    for label, score in zip(top_5_labels, top_5_scores)
+                                ]
+                            }
+                            
+                            all_objects.extend(top_5_labels)
+                            all_scenes.append(frame_analysis)
+                            
+                        except Exception as e:
+                            logger.error(f"Error using TensorFlow model: {str(e)}")
+                            # Fallback to using Hugging Face API
+                            await self._analyze_with_huggingface(frame, all_objects, all_scenes)
+                    else:
+                        # Use Hugging Face API directly
+                        await self._analyze_with_huggingface(frame, all_objects, all_scenes)
                     
                 except Exception as e:
                     logger.error(f"Error analyzing frame {frame.get('frame_number')}: {str(e)}")
@@ -165,6 +194,42 @@ class VisualAnalysisService:
             
         except Exception as e:
             logger.error(f"Error in analyze_frames: {str(e)}")
+            raise
+
+    async def _analyze_with_huggingface(self, frame: Dict[str, Any], all_objects: List[str], all_scenes: List[Dict[str, Any]]):
+        """Analyze frame using Hugging Face API"""
+        try:
+            # Convert image to bytes
+            img_byte_arr = io.BytesIO()
+            image = self._base64_to_image(frame['frame_data'])
+            image.save(img_byte_arr, format='JPEG')
+            frame_bytes = img_byte_arr.getvalue()
+            
+            # Send to Hugging Face API
+            response = requests.post(
+                self.api_url,
+                headers=self.headers,
+                data=frame_bytes
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            # Process results
+            frame_analysis = {
+                'timestamp': frame['timestamp'],
+                'frame_number': frame['frame_number'],
+                'objects': [
+                    {'label': detection['label'], 'confidence': float(detection['score'])}
+                    for detection in result
+                ]
+            }
+            
+            # Add detected objects
+            all_objects.extend(detection['label'] for detection in result)
+            all_scenes.append(frame_analysis)
+            
+        except Exception as e:
+            logger.error(f"Error using Hugging Face API: {str(e)}")
             raise
 
 # Initialize the visual analysis service
