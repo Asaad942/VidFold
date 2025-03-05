@@ -2,6 +2,8 @@ from typing import Dict, Any, Optional
 import yt_dlp
 from datetime import datetime
 import json
+import random
+import asyncio
 
 class VideoService:
     def __init__(self):
@@ -9,6 +11,43 @@ class VideoService:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,
+            'format': 'best',
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+            'no_warnings': True,
+            'quiet': True,
+            'extract_flat': True,
+            'format': 'best',
+            'nocheckcertificate': True,
+            'ignoreerrors': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
+            'socket_timeout': 30,
+            'retries': 10,
+            'fragment_retries': 10,
+            'file_access_retries': 10,
+            'extractor_retries': 10,
+            'retry_sleep': 5,
+            'retry_sleep_functions': {'fragment': lambda n: 5 * (n + 1)},
+            'sleep_interval': 5,
+            'max_sleep_interval': 30,
+            'sleep_interval_requests': 3,
+            'throttledratelimit': 100000,
+            'ratelimit': 100000,
+            'concurrent_fragments': 1,
+            'buffersize': 32768,
+            'http_chunk_size': 10485760,
+            'retry_sleep_functions': {'fragment': lambda n: 5 * (n + 1)},
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls'],
+                    'player_skip': ['js', 'configs', 'webpage']
+                }
+            }
         }
 
     async def extract_metadata(self, url: str) -> Dict[str, Any]:
@@ -22,6 +61,9 @@ class VideoService:
             Dictionary containing video metadata
         """
         try:
+            # Add random delay to avoid rate limiting
+            await asyncio.sleep(random.uniform(1, 3))
+            
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 # Extract video information
                 info = ydl.extract_info(url, download=False)
