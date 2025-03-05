@@ -16,6 +16,8 @@ import os
 from dotenv import load_dotenv
 import datetime
 from ...services.cache_service import cache_service
+from supabase import create_client
+from ...services.browser_service import browser_service
 
 load_dotenv()
 
@@ -24,6 +26,12 @@ router = APIRouter()
 # Initialize YouTube API client
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+
+# Initialize Supabase client with service role key for admin operations
+admin_supabase = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_KEY")
+)
 
 async def get_video_metadata(video_id: str) -> Dict[str, Any]:
     """Get video metadata using YouTube Data API with caching"""
@@ -71,49 +79,103 @@ async def get_video_metadata(video_id: str) -> Dict[str, Any]:
 async def process_video_background(video_id: str, url: str, youtube_id: str):
     """Background task to process video content"""
     try:
-        # Get video metadata using YouTube API
-        metadata = await get_video_metadata(youtube_id)
+        logging.info(f"Starting video processing for video_id: {video_id}, youtube_id: {youtube_id}")
         
-        # Update video record with basic info
-        supabase.table("videos").update({
-            "title": metadata['title'],
-            "thumbnail_url": metadata['thumbnail_url'],
-            "duration": metadata['duration'],
-            "status": "processing",
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }).eq("id", video_id).execute()
+        # Step 1: Get video metadata using YouTube API
+        try:
+            logging.info("Step 1: Fetching metadata from YouTube API...")
+            metadata = await get_video_metadata(youtube_id)
+            logging.info("Successfully fetched metadata from YouTube API")
+        except Exception as e:
+            error_msg = f"Failed to fetch YouTube metadata: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
+        
+        # Step 2: Update video record with basic info
+        try:
+            logging.info("Step 2: Updating video record with metadata...")
+            admin_supabase.table("videos").update({
+                "title": metadata['title'],
+                "thumbnail_url": metadata['thumbnail_url'],
+                "duration": metadata['duration'],
+                "status": "processing",
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }).eq("id", video_id).execute()
+            logging.info("Successfully updated video record with metadata")
+        except Exception as e:
+            error_msg = f"Failed to update video record with metadata: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
 
-        # Run visual analysis
-        visual_analysis = await visual_analysis_service.analyze_video(url)
+        # Step 3: Run visual analysis
+        try:
+            logging.info("Step 3: Running visual analysis...")
+            frames = await browser_service.capture_video_frames(
+                url,
+                interval=5,
+                max_frames=10  # Capture 10 frames for analysis
+            )
+            
+            if not frames:
+                raise Exception("No frames captured from video")
+            
+            analysis_results = await visual_analysis_service.analyze_frames(frames)
+            logging.info("Successfully completed visual analysis")
+        except Exception as e:
+            error_msg = f"Failed to complete visual analysis: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
         
-        # Run audio transcription
-        transcription = await audio_transcription_service.transcribe_video(url, video_id)
+        # Step 4: Run audio transcription
+        try:
+            logging.info("Step 4: Running audio transcription...")
+            transcription = await audio_transcription_service.transcribe_video(url, video_id)
+            logging.info("Successfully completed audio transcription")
+        except Exception as e:
+            error_msg = f"Failed to complete audio transcription: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
         
-        # Create analysis record
-        analysis_data = {
-            "video_id": video_id,
-            "visual_summary": visual_analysis.get("summary"),
-            "audio_transcription": transcription,
-            "metadata": metadata,
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
+        # Step 5: Create analysis record
+        try:
+            logging.info("Step 5: Creating analysis record...")
+            analysis_data = {
+                "video_id": video_id,
+                "visual_summary": analysis_results.get("summary"),
+                "audio_transcription": transcription,
+                "metadata": metadata,
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }
+            
+            # Insert analysis data
+            admin_supabase.table("video_analysis").insert(analysis_data).execute()
+            logging.info("Successfully created analysis record")
+        except Exception as e:
+            error_msg = f"Failed to create analysis record: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
         
-        # Insert analysis data
-        supabase.table("video_analysis").insert(analysis_data).execute()
-        
-        # Update video status to completed
-        supabase.table("videos").update({
-            "status": "completed",
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }).eq("id", video_id).execute()
+        # Step 6: Update video status to completed
+        try:
+            logging.info("Step 6: Updating video status to completed...")
+            admin_supabase.table("videos").update({
+                "status": "completed",
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }).eq("id", video_id).execute()
+            logging.info("Successfully completed video processing")
+        except Exception as e:
+            error_msg = f"Failed to update video status to completed: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
 
     except Exception as e:
-        logging.error(f"Error processing video {video_id}: {str(e)}")
+        error_msg = str(e)
+        logging.error(f"Error processing video {video_id}: {error_msg}")
         # Update video record with error status
         try:
-            supabase.table("videos").update({
+            admin_supabase.table("videos").update({
                 "status": "error",
-                "error": str(e),
+                "error": error_msg,
                 "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }).eq("id", video_id).execute()
         except Exception as db_error:
@@ -132,11 +194,20 @@ async def add_video(
     try:
         url = str(video.url)
         
-        # Extract user ID from token
-        user_id = user.get("user", {}).get("id")
+        # Extract user ID from token with better error handling
+        user_id = None
+        if isinstance(user, dict):
+            # Try different possible paths to find user ID
+            if "user" in user and isinstance(user["user"], dict):
+                user_id = user["user"].get("id")
+            elif "id" in user:
+                user_id = user["id"]
+                
         if not user_id:
-            logging.error(f"User ID not found in token: {user}")
+            logging.error(f"User ID not found in token structure: {user}")
             raise HTTPException(status_code=401, detail="User ID not found in token")
+            
+        logging.info(f"Using user_id: {user_id}")
         
         # If platform is not specified, detect it from the URL
         if video.platform == Platform.UNKNOWN:
@@ -185,15 +256,15 @@ async def add_video(
         
         # First, verify we can connect to the database
         try:
-            test_result = supabase.table("videos").select("id").limit(1).execute()
+            test_result = admin_supabase.table("videos").select("id").limit(1).execute()
             logging.info(f"Database connection test successful. Found {len(test_result.data)} videos")
         except Exception as e:
             logging.error(f"Database connection test failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Database connection error")
         
-        # Try to create the video record
+        # Try to create the video record using admin client
         try:
-            result = supabase.table("videos").insert(data).execute()
+            result = admin_supabase.table("videos").insert(data).execute()
             logging.info(f"Insert response: {result}")
             
             if not result.data:
@@ -201,7 +272,7 @@ async def add_video(
                 raise HTTPException(status_code=500, detail="Failed to create video record in database")
                 
             # Verify the record was created
-            verify_result = supabase.table("videos").select("*").eq("id", record_id).execute()
+            verify_result = admin_supabase.table("videos").select("*").eq("id", record_id).execute()
             if not verify_result.data:
                 logging.error(f"Video record not found after creation. ID: {record_id}")
                 raise HTTPException(status_code=500, detail="Video record not found after creation")
@@ -276,12 +347,18 @@ async def delete_video(
 ):
     """
     Soft delete a video and its associated data.
+    The video will be permanently deleted after 1 day.
     """
     try:
-        success = await video_management_service.delete_video(video_id, user["user"]["id"])
-        if not success:
+        result = await video_management_service.delete_video(video_id, user["user"]["id"])
+        if not result["success"]:
             raise HTTPException(status_code=404, detail="Video not found")
-        return {"message": "Video deleted successfully"}
+        return {
+            "message": "Video deleted successfully",
+            "deleted_at": result["deleted_at"],
+            "purge_deadline": result["purge_deadline"],
+            "days_until_purge": result["days_until_purge"]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -292,10 +369,16 @@ async def restore_video(
 ):
     """
     Restore a soft-deleted video.
+    Videos can only be restored within 1 day of deletion.
     """
     try:
         video = await video_management_service.restore_video(video_id, user["user"]["id"])
-        return video
+        return {
+            "message": "Video restored successfully",
+            "video": video
+        }
+    except HTTPException as e:
+        raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -408,4 +491,36 @@ async def transcribe_video_audio(
         return transcription
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def process_video(video_id: str, url: str, platform: str, user_id: str):
+    """Process a video using frame-based analysis"""
+    try:
+        # Update video status to processing
+        await video_management_service.update_video_status(video_id, "processing")
+        
+        # Capture frames from the video
+        frames = await browser_service.capture_video_frames(
+            url,
+            interval=5,
+            max_frames=10  # Capture 10 frames for analysis
+        )
+        
+        if not frames:
+            raise Exception("No frames captured from video")
+        
+        # Analyze frames
+        analysis_results = await visual_analysis_service.analyze_frames(frames)
+        
+        # Store analysis results
+        await video_management_service.store_analysis_results(video_id, analysis_results)
+        
+        # Update video status to completed
+        await video_management_service.update_video_status(video_id, "completed")
+        
+        logger.info(f"Successfully processed video {video_id}")
+        
+    except Exception as e:
+        logger.error(f"Error processing video {video_id}: {str(e)}")
+        await video_management_service.update_video_status(video_id, "error", str(e))
+        raise 
