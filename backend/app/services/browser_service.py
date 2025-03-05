@@ -102,6 +102,75 @@ class BrowserService:
             logger.error(f"Error in capture_video_frames: {str(e)}")
             raise
 
+    async def capture_video_audio(self, url: str, duration: int = 300) -> bytes:
+        """
+        Capture audio from a video URL using a headless browser.
+        
+        Args:
+            url: The video URL to capture audio from
+            duration: Maximum duration to capture in seconds
+            
+        Returns:
+            Audio data as bytes
+        """
+        try:
+            await self.initialize()
+            
+            logger.info(f"Navigating to URL: {url}")
+            await self.page.goto(url, wait_until='networkidle')
+            
+            # Wait for video element to be present
+            await self.page.wait_for_selector('video', timeout=10000)
+            
+            # Start video playback
+            await self.page.evaluate('''() => {
+                const video = document.querySelector('video');
+                if (video) {
+                    video.play();
+                }
+            }''')
+            
+            # Create audio context and media stream
+            audio_data = await self.page.evaluate('''async (duration) => {
+                const video = document.querySelector('video');
+                if (!video) return null;
+                
+                const audioContext = new AudioContext();
+                const source = audioContext.createMediaElementSource(video);
+                const destination = audioContext.createMediaStreamDestination();
+                source.connect(destination);
+                
+                // Create MediaRecorder
+                const mediaRecorder = new MediaRecorder(destination.stream);
+                const chunks = [];
+                
+                return new Promise((resolve) => {
+                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(chunks, { type: 'audio/webm' });
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64data = reader.result.split(',')[1];
+                            resolve(base64data);
+                        };
+                        reader.readAsDataURL(blob);
+                    };
+                    
+                    mediaRecorder.start();
+                    setTimeout(() => mediaRecorder.stop(), duration * 1000);
+                });
+            }''', duration)
+            
+            if not audio_data:
+                raise Exception("Failed to capture audio")
+            
+            # Convert base64 to bytes
+            return base64.b64decode(audio_data)
+            
+        except Exception as e:
+            logger.error(f"Error in capture_video_audio: {str(e)}")
+            raise
+
     async def cleanup(self):
         """Clean up browser resources"""
         try:
