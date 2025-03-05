@@ -28,7 +28,26 @@ class VisualAnalysisService:
             'postprocessors': [{
                 'key': 'FFmpegVideoConvertor',
                 'preferedformat': 'mp4',
-            }]
+            }],
+            # Add headers to avoid blocks
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
+            # Server-friendly options
+            'no_check_certificates': True,
+            'ignoreerrors': True,
+            'no_warnings': True,
+            'quiet': True,
+            'extract_flat': False,
+            'force_generic_extractor': False,
+            'geo_verification_proxy': None,
+            'source_address': '0.0.0.0',
+            'sleep_interval': 5,
+            'max_sleep_interval': 10,
+            'sleep_interval_requests': 3,
         }
 
     async def analyze_video(self, url: str, frame_interval: int = 5) -> Dict[str, Any]:

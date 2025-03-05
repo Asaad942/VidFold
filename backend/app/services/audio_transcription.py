@@ -33,7 +33,19 @@ class AudioTranscriptionService:
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-us,en;q=0.5',
                 'Sec-Fetch-Mode': 'navigate',
-            }
+            },
+            # Server-friendly options
+            'no_check_certificates': True,
+            'ignoreerrors': True,
+            'no_warnings': True,
+            'quiet': True,
+            'extract_flat': False,
+            'force_generic_extractor': False,
+            'geo_verification_proxy': None,
+            'source_address': '0.0.0.0',
+            'sleep_interval': 5,
+            'max_sleep_interval': 10,
+            'sleep_interval_requests': 3,
         }
         
         # Platform-specific options
