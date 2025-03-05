@@ -1,40 +1,57 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from app.database import supabase
+from supabase import create_client
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Initialize Supabase client with service role key
+supabase = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_KEY")
+)
+
 async def purge_deleted_videos():
-    """Deletes videos that have been soft deleted for more than 1 day."""
+    """Purge videos that have been soft deleted for more than 1 day"""
     try:
-        one_day_ago = (datetime.utcnow() - timedelta(days=1)).isoformat()
+        # Calculate the cutoff date (1 day ago)
+        cutoff_date = datetime.utcnow() - timedelta(days=1)
         
-        # Delete videos
-        result = supabase.table("videos").delete().lt("deleted_at", one_day_ago).execute()
+        # Find videos that have been soft deleted for more than 1 day
+        result = supabase.table("videos").select("id").eq("status", "deleted").lt("deleted_at", cutoff_date.isoformat()).execute()
         
-        # Delete associated video analysis
-        await supabase.table("video_analysis").delete().lt("deleted_at", one_day_ago).execute()
+        if not result.data:
+            logger.info("No videos to purge")
+            return
+            
+        # Get the video IDs to purge
+        video_ids = [video["id"] for video in result.data]
         
-        # Delete associated video categories
-        await supabase.table("video_categories").delete().lt("deleted_at", one_day_ago).execute()
+        # Delete the videos and their associated data
+        # The ON DELETE CASCADE will handle the related records
+        delete_result = supabase.table("videos").delete().in_("id", video_ids).execute()
         
-        logger.info(f"Successfully purged {len(result.data) if result.data else 0} deleted videos")
+        logger.info(f"Successfully purged {len(video_ids)} deleted videos")
         
     except Exception as e:
         logger.error(f"Error purging deleted videos: {str(e)}")
+        raise
 
-async def schedule_purge_task():
-    """Schedule the purge task to run daily."""
+async def run_periodic_tasks():
+    """Run periodic maintenance tasks"""
     while True:
         try:
-            # Run purge task
+            # Purge deleted videos
             await purge_deleted_videos()
             
-            # Wait for 24 hours before next run
-            await asyncio.sleep(24 * 60 * 60)
+            # Wait for 1 hour before running again
+            await asyncio.sleep(3600)
             
         except Exception as e:
-            logger.error(f"Error in purge task scheduler: {str(e)}")
-            # Wait for 1 hour before retrying on error
-            await asyncio.sleep(60 * 60) 
+            logger.error(f"Error in periodic tasks: {str(e)}")
+            # Wait for 5 minutes before retrying on error
+            await asyncio.sleep(300) 
