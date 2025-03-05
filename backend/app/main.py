@@ -6,7 +6,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.endpoints import videos, auth
-from .core.tasks import schedule_purge_task
+from app.core.tasks import schedule_purge_task
 import asyncio
 
 # Add the backend directory to Python path
