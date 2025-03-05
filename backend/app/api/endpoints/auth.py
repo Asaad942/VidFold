@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Dict, Any, Optional
-from ..services.auth import auth_service
+from app.services.auth import auth_service
 
 router = APIRouter()
 
