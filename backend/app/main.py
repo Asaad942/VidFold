@@ -6,7 +6,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.endpoints import videos, auth
-from .core.tasks import schedule_purge_task
+from .core.tasks import run_periodic_tasks
 import asyncio
 
 # Add the backend directory to Python path
@@ -40,8 +40,8 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on application startup."""
-    # Start the purge task
-    asyncio.create_task(schedule_purge_task())
+    # Start the periodic tasks
+    asyncio.create_task(run_periodic_tasks())
 
 if __name__ == "__main__":
     import uvicorn
