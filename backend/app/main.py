@@ -14,6 +14,9 @@ current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
+# Get port from environment variable or default to 8000
+PORT = int(os.getenv("PORT", "8000"))
+
 app = FastAPI(title="VidFold API")
 
 # Configure CORS
@@ -38,4 +41,8 @@ async def health_check():
 async def startup_event():
     """Start background tasks on application startup."""
     # Start the purge task
-    asyncio.create_task(schedule_purge_task()) 
+    asyncio.create_task(schedule_purge_task())
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT) 
