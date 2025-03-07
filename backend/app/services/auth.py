@@ -16,25 +16,25 @@ class AuthService:
             
             # Remove any trailing spaces from the URL and key
             supabase_url = settings.SUPABASE_URL.strip()
-            supabase_key = settings.SUPABASE_KEY.strip()
+            supabase_key = settings.SUPABASE_SERVICE_KEY.strip()  # Use service role key
             
             # Log the URL and key (masked for security)
             logger.debug(f"Supabase URL: {supabase_url}")
             logger.debug(f"Supabase key length: {len(supabase_key)}")
             
             if not supabase_url or not supabase_key:
-                raise ValueError("Supabase URL and key must be provided")
+                raise ValueError("Supabase URL and service role key must be provided")
             
             # Log that we're about to create the client
-            logger.debug("Attempting to create Supabase client...")
+            logger.debug("Attempting to create Supabase client with service role...")
             
             try:
-                # Initialize Supabase client with basic configuration
+                # Initialize Supabase client with service role key
                 self.supabase: Client = create_client(
                     supabase_url,
                     supabase_key
                 )
-                logger.debug("Supabase client created successfully")
+                logger.debug("Supabase client created successfully with service role")
             except TypeError as type_error:
                 logger.error(f"TypeError during client creation: {str(type_error)}")
                 raise
