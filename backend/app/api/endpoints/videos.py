@@ -18,10 +18,15 @@ import datetime
 from ...services.cache_service import cache_service
 from supabase import create_client
 from ...services.browser_service import browser_service
+from ...core.database import get_supabase
+from ...models.video import VideoCreate, VideoResponse
+from ...services.video import video_service
+import asyncio
 
 load_dotenv()
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Initialize YouTube API client
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
@@ -524,3 +529,171 @@ async def process_video(video_id: str, url: str, platform: str, user_id: str):
         logger.error(f"Error processing video {video_id}: {str(e)}")
         await video_management_service.update_video_status(video_id, "error", str(e))
         raise 
+
+@router.post("/", response_model=VideoResponse)
+async def create_video(
+    video: VideoCreate,
+    background_tasks: BackgroundTasks,
+    current_user = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase)
+):
+    """Create a new video entry"""
+    try:
+        # Check if video is already being processed
+        processing_status = await video_service.check_processing_status(video.url)
+        if processing_status == "processing":
+            raise HTTPException(
+                status_code=400,
+                detail="This video is already being processed"
+            )
+
+        # Mark video as processing
+        await video_service.mark_as_processing(video.url)
+
+        # Get video metadata (will use cache if available)
+        metadata = await video_service.get_video_metadata(video.url)
+        
+        # Create video entry
+        video_data = {
+            "user_id": current_user.id,
+            "url": video.url,
+            "platform": metadata.get("platform"),
+            "title": metadata.get("title"),
+            "thumbnail_url": metadata.get("thumbnail_url"),
+            "duration": metadata.get("duration"),
+            "status": "processing"
+        }
+        
+        result = supabase.table("videos").insert(video_data).execute()
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create video entry")
+            
+        video_id = result.data[0]["id"]
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_video,
+            video_id,
+            video.url,
+            current_user.id,
+            supabase
+        )
+        
+        return VideoResponse(**result.data[0])
+        
+    except Exception as e:
+        logger.error(f"Error creating video: {str(e)}")
+        await video_service.clear_processing_status(video.url)
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def process_video(video_id: str, url: str, user_id: str, supabase: Client):
+    """Process video in the background"""
+    try:
+        # Update video status
+        supabase.table("videos").update({"status": "processing"}).eq("id", video_id).execute()
+        
+        # Capture frames
+        frames = await video_service.browser_service.capture_video_frames(
+            url,
+            interval=5,
+            max_frames=10
+        )
+        
+        if not frames:
+            raise Exception("No frames captured from video")
+            
+        # Analyze frames
+        analysis_result = await visual_analysis_service.analyze_frames(frames)
+        
+        # Capture and transcribe audio
+        audio_data = await video_service.browser_service.capture_video_audio(url)
+        transcription = await audio_transcription_service.transcribe_video(audio_data)
+        
+        # Store analysis results
+        analysis_data = {
+            "video_id": video_id,
+            "visual_summary": analysis_result.get("summary"),
+            "audio_transcription": transcription,
+            "metadata": {
+                "frame_count": len(frames),
+                "duration": frames[-1]["timestamp"] if frames else 0
+            }
+        }
+        
+        supabase.table("video_analysis").insert(analysis_data).execute()
+        
+        # Update video status
+        supabase.table("videos").update({"status": "completed"}).eq("id", video_id).execute()
+        
+    except Exception as e:
+        logger.error(f"Error processing video: {str(e)}")
+        supabase.table("videos").update({
+            "status": "failed",
+            "error": str(e)
+        }).eq("id", video_id).execute()
+        
+    finally:
+        # Clear processing status
+        await video_service.clear_processing_status(url)
+
+@router.get("/", response_model=List[VideoResponse])
+async def get_videos(
+    current_user = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get all videos for the current user"""
+    try:
+        result = supabase.table("videos").select("*").eq("user_id", current_user.id).execute()
+        return [VideoResponse(**video) for video in result.data]
+    except Exception as e:
+        logger.error(f"Error getting videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{video_id}", response_model=VideoResponse)
+async def get_video(
+    video_id: str,
+    current_user = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get a specific video by ID"""
+    try:
+        result = supabase.table("videos").select("*").eq("id", video_id).eq("user_id", current_user.id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return VideoResponse(**result.data[0])
+    except Exception as e:
+        logger.error(f"Error getting video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{video_id}", response_model=VideoResponse)
+async def update_video(
+    video_id: str,
+    video: VideoUpdate,
+    current_user = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase)
+):
+    """Update a video"""
+    try:
+        result = supabase.table("videos").update(video.dict(exclude_unset=True)).eq("id", video_id).eq("user_id", current_user.id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return VideoResponse(**result.data[0])
+    except Exception as e:
+        logger.error(f"Error updating video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{video_id}")
+async def delete_video(
+    video_id: str,
+    current_user = Depends(get_current_user),
+    supabase: Client = Depends(get_supabase)
+):
+    """Delete a video"""
+    try:
+        result = supabase.table("videos").delete().eq("id", video_id).eq("user_id", current_user.id).execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return {"message": "Video deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting video: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 

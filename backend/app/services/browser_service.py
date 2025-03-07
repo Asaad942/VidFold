@@ -1,63 +1,79 @@
-from typing import List, Optional, Dict, Any
-import asyncio
+"""
+Browser service for handling browser operations
+"""
 import logging
-from playwright.async_api import async_playwright
 import base64
-from datetime import datetime
+from typing import List, Dict, Any, Optional
+from playwright.async_api import async_playwright
+import asyncio
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 class BrowserService:
     def __init__(self):
+        """Initialize browser service"""
+        self.playwright = None
         self.browser = None
         self.context = None
-        self.page = None
-        self.is_initialized = False
 
     async def initialize(self):
-        """Initialize the browser and context"""
-        if not self.is_initialized:
-            try:
-                playwright = await async_playwright().start()
-                self.browser = await playwright.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox']
-                )
-                self.context = await self.browser.new_context(
-                    viewport={'width': 1920, 'height': 1080},
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                )
-                self.page = await self.context.new_page()
-                self.is_initialized = True
-                logger.info("Browser service initialized successfully")
-            except Exception as e:
-                logger.error(f"Error initializing browser service: {str(e)}")
-                raise
+        """Initialize browser and context"""
+        try:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+            self.context = await self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            )
+            logger.info("Browser service initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize browser service: {str(e)}")
+            raise
+
+    async def cleanup(self):
+        """Clean up browser resources"""
+        try:
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if self.playwright:
+                await self.playwright.stop()
+            logger.info("Browser service cleaned up successfully")
+        except Exception as e:
+            logger.error(f"Error cleaning up browser service: {str(e)}")
 
     async def capture_video_frames(self, url: str, interval: int = 5, max_frames: int = 10) -> List[Dict[str, Any]]:
         """
-        Capture frames from a video URL using a headless browser.
+        Capture frames from a video URL
         
         Args:
-            url: The video URL to capture frames from
-            interval: Time interval between frame captures in seconds
+            url: Video URL
+            interval: Time interval between frames in seconds
             max_frames: Maximum number of frames to capture
             
         Returns:
             List of dictionaries containing frame data and timestamps
         """
         try:
-            await self.initialize()
-            
-            logger.info(f"Navigating to URL: {url}")
-            await self.page.goto(url, wait_until='networkidle')
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
             
             # Wait for video element to be present
-            await self.page.wait_for_selector('video', timeout=10000)
+            await page.wait_for_selector('video', timeout=10000)
             
             # Start video playback
-            await self.page.evaluate('''() => {
+            await page.evaluate('''() => {
                 const video = document.querySelector('video');
                 if (video) {
                     video.play();
@@ -68,62 +84,48 @@ class BrowserService:
             frame_count = 0
             
             while frame_count < max_frames:
-                try:
-                    # Wait for the specified interval
-                    await asyncio.sleep(interval)
-                    
-                    # Take a screenshot
-                    screenshot = await self.page.screenshot(
-                        type='jpeg',
-                        quality=80,
-                        full_page=False
-                    )
-                    
-                    # Convert to base64
-                    frame_base64 = base64.b64encode(screenshot).decode('utf-8')
-                    
-                    # Add frame data
-                    frames.append({
-                        'timestamp': datetime.utcnow().isoformat(),
-                        'frame_number': frame_count,
-                        'frame_data': frame_base64
-                    })
-                    
-                    frame_count += 1
-                    logger.info(f"Captured frame {frame_count}/{max_frames}")
-                    
-                except Exception as e:
-                    logger.error(f"Error capturing frame {frame_count}: {str(e)}")
-                    break
+                # Capture screenshot
+                screenshot = await page.screenshot(type='jpeg', quality=80)
+                frame_data = base64.b64encode(screenshot).decode('utf-8')
+                
+                frames.append({
+                    'frame_data': frame_data,
+                    'timestamp': frame_count * interval
+                })
+                
+                frame_count += 1
+                await asyncio.sleep(interval)
             
+            await page.close()
             return frames
             
         except Exception as e:
-            logger.error(f"Error in capture_video_frames: {str(e)}")
+            logger.error(f"Error capturing video frames: {str(e)}")
             raise
 
     async def capture_video_audio(self, url: str, duration: int = 300) -> bytes:
         """
-        Capture audio from a video URL using a headless browser.
+        Capture audio from a video URL
         
         Args:
-            url: The video URL to capture audio from
+            url: Video URL
             duration: Maximum duration to capture in seconds
             
         Returns:
             Audio data as bytes
         """
         try:
-            await self.initialize()
-            
-            logger.info(f"Navigating to URL: {url}")
-            await self.page.goto(url, wait_until='networkidle')
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
             
             # Wait for video element to be present
-            await self.page.wait_for_selector('video', timeout=10000)
+            await page.wait_for_selector('video', timeout=10000)
             
             # Start video playback
-            await self.page.evaluate('''() => {
+            await page.evaluate('''() => {
                 const video = document.querySelector('video');
                 if (video) {
                     video.play();
@@ -131,60 +133,214 @@ class BrowserService:
             }''')
             
             # Create audio context and media stream
-            audio_data = await self.page.evaluate('''async (duration) => {
-                const video = document.querySelector('video');
-                if (!video) return null;
-                
+            audio_data = await page.evaluate('''async (duration) => {
                 const audioContext = new AudioContext();
-                const source = audioContext.createMediaElementSource(video);
-                const destination = audioContext.createMediaStreamDestination();
-                source.connect(destination);
+                const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
                 
-                // Create MediaRecorder
-                const mediaRecorder = new MediaRecorder(destination.stream);
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+                
                 const chunks = [];
+                processor.onaudioprocess = (e) => {
+                    chunks.push(e.inputBuffer.getChannelData(0));
+                };
                 
-                return new Promise((resolve) => {
-                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                    mediaRecorder.onstop = () => {
-                        const blob = new Blob(chunks, { type: 'audio/webm' });
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            const base64data = reader.result.split(',')[1];
-                            resolve(base64data);
-                        };
-                        reader.readAsDataURL(blob);
-                    };
-                    
-                    mediaRecorder.start();
-                    setTimeout(() => mediaRecorder.stop(), duration * 1000);
-                });
+                await new Promise(resolve => setTimeout(resolve, duration * 1000));
+                
+                const audioBuffer = audioContext.createBuffer(1, chunks.length * 4096, audioContext.sampleRate);
+                const channelData = audioBuffer.getChannelData(0);
+                
+                for (let i = 0; i < chunks.length; i++) {
+                    channelData.set(chunks[i], i * 4096);
+                }
+                
+                return audioBuffer;
             }''', duration)
             
-            if not audio_data:
-                raise Exception("Failed to capture audio")
-            
-            # Convert base64 to bytes
-            return base64.b64decode(audio_data)
+            await page.close()
+            return audio_data
             
         except Exception as e:
-            logger.error(f"Error in capture_video_audio: {str(e)}")
+            logger.error(f"Error capturing video audio: {str(e)}")
             raise
 
-    async def cleanup(self):
-        """Clean up browser resources"""
+    async def get_youtube_metadata(self, url: str) -> Dict[str, Any]:
+        """
+        Get metadata from YouTube video
+        
+        Args:
+            url: YouTube video URL
+            
+        Returns:
+            Dictionary containing video metadata
+        """
         try:
-            if self.page:
-                await self.page.close()
-            if self.context:
-                await self.context.close()
-            if self.browser:
-                await self.browser.close()
-            self.is_initialized = False
-            logger.info("Browser service cleaned up successfully")
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+            
+            # Wait for video element to be present
+            await page.wait_for_selector('video', timeout=10000)
+            
+            # Extract metadata
+            metadata = await page.evaluate('''() => {
+                const video = document.querySelector('video');
+                const title = document.title;
+                const description = document.querySelector('meta[name="description"]')?.content;
+                const thumbnail = document.querySelector('link[rel="image_src"]')?.href;
+                const duration = video?.duration;
+                
+                return {
+                    title,
+                    description,
+                    thumbnail_url: thumbnail,
+                    duration: duration ? Math.floor(duration) : null,
+                    platform: 'youtube'
+                };
+            }''')
+            
+            await page.close()
+            return metadata
+            
         except Exception as e:
-            logger.error(f"Error cleaning up browser service: {str(e)}")
+            logger.error(f"Error getting YouTube metadata: {str(e)}")
             raise
 
-# Create a singleton instance
+    async def get_instagram_metadata(self, url: str) -> Dict[str, Any]:
+        """
+        Get metadata from Instagram video
+        
+        Args:
+            url: Instagram video URL
+            
+        Returns:
+            Dictionary containing video metadata
+        """
+        try:
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+            
+            # Wait for video element to be present
+            await page.wait_for_selector('video', timeout=10000)
+            
+            # Extract metadata
+            metadata = await page.evaluate('''() => {
+                const video = document.querySelector('video');
+                const title = document.title;
+                const description = document.querySelector('meta[name="description"]')?.content;
+                const thumbnail = document.querySelector('link[rel="image_src"]')?.href;
+                const duration = video?.duration;
+                
+                return {
+                    title,
+                    description,
+                    thumbnail_url: thumbnail,
+                    duration: duration ? Math.floor(duration) : null,
+                    platform: 'instagram'
+                };
+            }''')
+            
+            await page.close()
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Error getting Instagram metadata: {str(e)}")
+            raise
+
+    async def get_tiktok_metadata(self, url: str) -> Dict[str, Any]:
+        """
+        Get metadata from TikTok video
+        
+        Args:
+            url: TikTok video URL
+            
+        Returns:
+            Dictionary containing video metadata
+        """
+        try:
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+            
+            # Wait for video element to be present
+            await page.wait_for_selector('video', timeout=10000)
+            
+            # Extract metadata
+            metadata = await page.evaluate('''() => {
+                const video = document.querySelector('video');
+                const title = document.title;
+                const description = document.querySelector('meta[name="description"]')?.content;
+                const thumbnail = document.querySelector('link[rel="image_src"]')?.href;
+                const duration = video?.duration;
+                
+                return {
+                    title,
+                    description,
+                    thumbnail_url: thumbnail,
+                    duration: duration ? Math.floor(duration) : null,
+                    platform: 'tiktok'
+                };
+            }''')
+            
+            await page.close()
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Error getting TikTok metadata: {str(e)}")
+            raise
+
+    async def get_facebook_metadata(self, url: str) -> Dict[str, Any]:
+        """
+        Get metadata from Facebook video
+        
+        Args:
+            url: Facebook video URL
+            
+        Returns:
+            Dictionary containing video metadata
+        """
+        try:
+            if not self.context:
+                await self.initialize()
+                
+            page = await self.context.new_page()
+            await page.goto(url, wait_until='networkidle')
+            
+            # Wait for video element to be present
+            await page.wait_for_selector('video', timeout=10000)
+            
+            # Extract metadata
+            metadata = await page.evaluate('''() => {
+                const video = document.querySelector('video');
+                const title = document.title;
+                const description = document.querySelector('meta[name="description"]')?.content;
+                const thumbnail = document.querySelector('link[rel="image_src"]')?.href;
+                const duration = video?.duration;
+                
+                return {
+                    title,
+                    description,
+                    thumbnail_url: thumbnail,
+                    duration: duration ? Math.floor(duration) : null,
+                    platform: 'facebook'
+                };
+            }''')
+            
+            await page.close()
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Error getting Facebook metadata: {str(e)}")
+            raise
+
+# Initialize browser service
 browser_service = BrowserService() 
